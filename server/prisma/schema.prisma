@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         Int      @id @default(autoincrement())
+  provider   String
+  providerId String
+  email      String?  @unique
+  name       String?
+  username   String?  @unique
+  avatar     String?
+  sex        String?
+  birthday   DateTime?
+  heightCm   Float?
+  weightKg   Float?
+  onboardingCompleted Boolean @default(false)
+  onboardingAnswers   Json?
+  createdAt  DateTime @default(now())
+
+  @@unique([provider, providerId])
+}
+
+model Muscle {
+  id       Int      @id @default(autoincrement())
+  name     String
+  slug     String   @unique
+  side     String
+  regionId String
+  exercises Exercise[] @relation("PrimaryMuscle")
+  createdAt DateTime @default(now())
+}
+
+model Equipment {
+  id       Int      @id @default(autoincrement())
+  name     String
+  slug     String   @unique
+  exercises ExerciseEquipment[]
+  createdAt DateTime @default(now())
+}
+
+model Exercise {
+  id              Int      @id @default(autoincrement())
+  name            String
+  slug            String   @unique
+  difficulty      String?
+  primaryMuscleId Int?
+  primaryMuscle   Muscle?  @relation("PrimaryMuscle", fields: [primaryMuscleId], references: [id])
+  instructions    Json?
+  notes           String?
+  media           Json?
+  equipments      ExerciseEquipment[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ExerciseEquipment {
+  exerciseId  Int
+  equipmentId Int
+  exercise    Exercise @relation(fields: [exerciseId], references: [id])
+  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+
+  @@id([exerciseId, equipmentId])
+}

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <!-- Frame -->
+  <path d="M6 4v16" />
+  <path d="M18 4v16" />
+  <path d="M6 4h12" />
+  <path d="M6 20h12" />
+  <!-- Rails -->
+  <path d="M8 6v12" />
+  <path d="M16 6v12" />
+  <!-- Barbell -->
+  <path d="M9 12h6" />
+  <path d="M8.2 10.5v3" />
+  <path d="M15.8 10.5v3" />
+</svg>
