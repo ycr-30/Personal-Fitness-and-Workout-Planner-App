@@ -336,7 +336,7 @@ export const useAuthStore = defineStore('auth', {
 
     async logout() {
       try {
-        await fetch('http://localhost:4000/logout', {
+        await fetch(`${AUTH_SERVER_ORIGIN}/logout`, {
           method: 'POST',
           credentials: 'include'
         })
@@ -398,7 +398,7 @@ export const useAuthStore = defineStore('auth', {
       // 如果有后端会话（通过 hydrateFromServer 获得 id/provider 等），优先写后端
       if (this.user.id) {
         try {
-          const res = await fetch('http://localhost:4000/profile', {
+          const res = await fetch(`${AUTH_SERVER_ORIGIN}/profile`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
