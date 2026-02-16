@@ -24,7 +24,39 @@ const {
 const app = express()
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID)
 const secureCookie = process.env.NODE_ENV === 'production'
-const prisma = new PrismaClient()
+
+function normalizeDatabaseUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return rawUrl
+  try {
+    const parsed = new URL(rawUrl)
+    const schema = parsed.searchParams.get('schema')
+    // Some malformed URLs accidentally set schema to query fragments
+    // (for example "apppgbouncer=true"), which breaks Prisma table lookup.
+    if (!schema || /pgbouncer|connection_limit|sslmode/i.test(schema)) {
+      parsed.searchParams.set('schema', 'public')
+    }
+    return parsed.toString()
+  } catch {
+    return rawUrl
+  }
+}
+
+const normalizedDatabaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL)
+if (normalizedDatabaseUrl && normalizedDatabaseUrl !== process.env.DATABASE_URL) {
+  console.warn('DATABASE_URL schema was normalized to public')
+}
+
+const prisma = new PrismaClient(
+  normalizedDatabaseUrl
+    ? {
+        datasources: {
+          db: {
+            url: normalizedDatabaseUrl
+          }
+        }
+      }
+    : undefined
+)
 
 function resolveRedirectTarget(raw) {
   if (!raw || typeof raw !== 'string') return null
