@@ -247,6 +247,11 @@ function requireAuth(req, res, next) {
 }
 
 async function findOrCreateUser(profile) {
+  const normalizedEmail =
+    typeof profile.email === 'string' && profile.email.trim()
+      ? profile.email.trim().toLowerCase()
+      : null
+
   const existing = await prisma.user.findUnique({
     where: {
       provider_providerId: {
@@ -260,7 +265,7 @@ async function findOrCreateUser(profile) {
     const updated = await prisma.user.update({
       where: { id: existing.id },
       data: {
-        email: profile.email ?? existing.email,
+        email: normalizedEmail ?? existing.email,
         name: profile.name ?? existing.name,
         avatar: profile.avatar ?? existing.avatar
       }
@@ -268,11 +273,32 @@ async function findOrCreateUser(profile) {
     return { user: updated, created: false }
   }
 
+  // If the same email already exists (e.g. user signed in via another method),
+  // reuse that account instead of failing on unique(email) constraint.
+  if (normalizedEmail) {
+    const existingByEmail = await prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    })
+    if (existingByEmail) {
+      const linked = await prisma.user.update({
+        where: { id: existingByEmail.id },
+        data: {
+          provider: profile.provider,
+          providerId: profile.providerId,
+          email: normalizedEmail,
+          name: profile.name ?? existingByEmail.name,
+          avatar: profile.avatar ?? existingByEmail.avatar
+        }
+      })
+      return { user: linked, created: false }
+    }
+  }
+
   const createdUser = await prisma.user.create({
     data: {
       provider: profile.provider,
       providerId: profile.providerId,
-      email: profile.email ?? null,
+      email: normalizedEmail,
       name: profile.name ?? null,
       avatar: profile.avatar ?? null
     }
@@ -355,7 +381,11 @@ app.get('/auth/google/callback', async (req, res) => {
         : redirectTarget || `${APP_ORIGIN}/dashboard`
     res.redirect(target)
   } catch (err) {
-    console.error('Google callback error', err)
+    console.error('Google callback error', {
+      message: err?.message,
+      code: err?.code,
+      stack: err?.stack
+    })
     res.status(500).send('Google auth failed')
   }
 })
