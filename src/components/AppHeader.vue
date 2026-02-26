@@ -1,8 +1,8 @@
 <template>
   <aside class="app-sidebar">
-    <div class="brand">
+    <RouterLink class="brand brand-link" to="/dashboard" aria-label="Go to dashboard">
       <img class="brand-logo" src="/photo/logo.png" alt="Keep Fit" />
-    </div>
+    </RouterLink>
 
     <nav class="sidebar-nav">
       <RouterLink class="nav-link" to="/dashboard">
@@ -177,12 +177,24 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 
+.brand-link {
+  text-decoration: none;
+}
+
+.brand-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 10px;
+}
+
 .brand-logo {
   width: 220px;
   height: auto;
   max-width: 100%;
   display: block;
   object-fit: contain;
+  filter: var(--logo-filter, none);
+  opacity: var(--logo-opacity, 1);
 }
 
 .logo-mark {

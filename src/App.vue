@@ -9,6 +9,8 @@
     <main v-else class="app-main compact">
       <RouterView />
     </main>
+
+    <FloatingCoachChat v-if="showCoachChat" />
   </div>
 </template>
 
@@ -17,6 +19,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import AppHeader from '@/components/AppHeader.vue'
+import FloatingCoachChat from '@/components/FloatingCoachChat.vue'
 import { syncLocalDataToSupabase, hydrateLocalDataFromSupabase } from '@/lib/supabaseSync'
 import { getIdentityFromUser, getUserStorageKey } from '@/lib/userStorage'
 
@@ -26,6 +29,7 @@ auth.init()
 
 const hideShell = computed(() => route.meta?.hideShell)
 const showShell = computed(() => auth.isAuthed && !hideShell.value)
+const showCoachChat = computed(() => auth.isAuthed && route.name === 'dashboard')
 const systemTheme = ref('light')
 const syncInProgress = ref(false)
 const syncTimer = ref(null)
@@ -172,6 +176,8 @@ onBeforeUnmount(() => {
     'Helvetica Neue', Arial, sans-serif;
   --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display',
     'Helvetica Neue', Arial, sans-serif;
+  --logo-filter: none;
+  --logo-opacity: 1;
 }
 
 :root[data-theme='dark'] {
@@ -193,6 +199,8 @@ onBeforeUnmount(() => {
   --info-soft: #1e3a5f;
   --shadow-soft: 0 20px 40px rgba(0, 0, 0, 0.4);
   --shadow-strong: 0 30px 60px rgba(0, 0, 0, 0.5);
+  --logo-filter: brightness(0) invert(1);
+  --logo-opacity: 0.94;
 }
 
 *,

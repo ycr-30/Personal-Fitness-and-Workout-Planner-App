@@ -23,6 +23,8 @@ model User {
   onboardingCompleted Boolean @default(false)
   onboardingAnswers   Json?
   createdAt  DateTime @default(now())
+  aiChatConversations AiChatConversation[]
+  aiChatMessages      AiChatMessage[]
 
   @@unique([provider, providerId])
 }
@@ -67,4 +69,30 @@ model ExerciseEquipment {
   equipment   Equipment @relation(fields: [equipmentId], references: [id])
 
   @@id([exerciseId, equipmentId])
+}
+
+model AiChatConversation {
+  id        Int             @id @default(autoincrement())
+  userId    Int
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String?
+  messages  AiChatMessage[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
+model AiChatMessage {
+  id             Int                @id @default(autoincrement())
+  conversationId Int
+  userId         Int
+  conversation   AiChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String
+  content        String
+  createdAt      DateTime           @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
 }

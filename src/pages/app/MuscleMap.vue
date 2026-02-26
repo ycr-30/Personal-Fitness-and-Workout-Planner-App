@@ -475,12 +475,12 @@ onBeforeUnmount(() => {
 
 .stage-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(240px, 320px);
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 360px);
   gap: 16px;
 }
 
 .stage-layout.is-detail {
-  grid-template-columns: minmax(0, 1.35fr) minmax(240px, 320px);
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 360px);
 }
 
 .stage-main {
@@ -665,6 +665,11 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 12px;
   align-content: start;
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 28px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .sidebar-card {
@@ -683,6 +688,10 @@ onBeforeUnmount(() => {
 
 .equipment-card :deep(.equipment-filter) {
   gap: 10px;
+}
+
+.equipment-card {
+  position: static;
 }
 
 .sidebar-hint {
@@ -747,6 +756,21 @@ onBeforeUnmount(() => {
   .demo-body,
   .demo-loading {
     grid-template-columns: 1fr;
+  }
+
+  .stage-sidebar {
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .equipment-card {
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
   }
 }
 
