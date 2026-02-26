@@ -25,10 +25,12 @@ const {
   AI_CHAT_SYSTEM_PROMPT = '',
   AI_CHAT_TEMPERATURE = '0.2',
   AI_CHAT_MAX_TOKENS = '700',
+  AI_CHAT_TIMEOUT_MS = '25000',
   AI_EMBEDDING_API_URL = '',
   AI_EMBEDDING_API_KEY = '',
   AI_EMBEDDING_API_FORMAT = 'openai',
   AI_EMBEDDING_MODEL = 'BAAI/bge-base-en-v1.5',
+  AI_EMBEDDING_TIMEOUT_MS = '12000',
   RAG_EMBED_DIM = '768',
   RAG_MATCH_COUNT = '8',
   RAG_MATCH_THRESHOLD = '0.6',
@@ -50,6 +52,8 @@ const parsedRagContextItems = Number.parseInt(RAG_CONTEXT_ITEMS, 10)
 const parsedRagContextMaxChars = Number.parseInt(RAG_CONTEXT_MAX_CHARS, 10)
 const parsedChatMaxTokens = Number.parseInt(AI_CHAT_MAX_TOKENS, 10)
 const parsedChatTemperature = Number.parseFloat(AI_CHAT_TEMPERATURE)
+const parsedChatTimeoutMs = Number.parseInt(AI_CHAT_TIMEOUT_MS, 10)
+const parsedEmbeddingTimeoutMs = Number.parseInt(AI_EMBEDDING_TIMEOUT_MS, 10)
 
 const RAG_EMBEDDING_DIMENSION = Number.isInteger(parsedRagEmbedDim) && parsedRagEmbedDim > 0 ? parsedRagEmbedDim : 768
 const RAG_RETRIEVAL_COUNT =
@@ -68,6 +72,14 @@ const CHAT_MODEL_TEMPERATURE =
   Number.isFinite(parsedChatTemperature) && parsedChatTemperature >= 0 && parsedChatTemperature <= 2
     ? parsedChatTemperature
     : 0.2
+const CHAT_REQUEST_TIMEOUT_MS =
+  Number.isInteger(parsedChatTimeoutMs) && parsedChatTimeoutMs >= 2000
+    ? Math.min(parsedChatTimeoutMs, 120000)
+    : 25000
+const EMBEDDING_REQUEST_TIMEOUT_MS =
+  Number.isInteger(parsedEmbeddingTimeoutMs) && parsedEmbeddingTimeoutMs >= 1000
+    ? Math.min(parsedEmbeddingTimeoutMs, 60000)
+    : 12000
 const RAG_DEFAULT_THRESHOLD = (() => {
   const parsed = Number.parseFloat(RAG_MATCH_THRESHOLD)
   if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) return parsed
@@ -186,6 +198,24 @@ app.use(cookieParser())
 app.get('/health', (req, res) => {
   res.json({ ok: true })
 })
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000, timeoutLabel = 'Request') {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`${timeoutLabel} timed out after ${timeoutMs}ms`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 function normalizeListParam(value) {
   if (!value) return []
@@ -636,11 +666,16 @@ async function requestQueryEmbedding(queryText) {
           model: AI_EMBEDDING_MODEL
         }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(requestBody)
-  })
+  const response = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody)
+    },
+    EMBEDDING_REQUEST_TIMEOUT_MS,
+    'Embedding request'
+  )
   if (!response.ok) {
     const text = await response.text()
     throw new Error(text || `Embedding endpoint error: ${response.status}`)
@@ -841,11 +876,16 @@ async function requestChatCompletion({ messages, user, ragChunks, ragContextText
           sources: formatRagSources(ragChunks)
         }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(requestBody)
-  })
+  const response = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody)
+    },
+    CHAT_REQUEST_TIMEOUT_MS,
+    'Chat completion request'
+  )
   if (!response.ok) {
     const errorText = await response.text()
     throw new Error(errorText || `Model endpoint error: ${response.status}`)
