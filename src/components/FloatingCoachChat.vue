@@ -41,7 +41,7 @@
           class="chat-message"
           :class="item.role === 'user' ? 'user' : 'assistant'"
         >
-          <p>{{ item.content }}</p>
+          <div class="chat-content" v-html="renderRichContent(item.content)" />
           <time>{{ formatTime(item.createdAt) }}</time>
         </article>
       </div>
@@ -389,6 +389,94 @@ function normalizeMessage(raw) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderInlineMarkdown(text) {
+  const escaped = escapeHtml(text)
+  return escaped
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+}
+
+function splitTableRow(line) {
+  let row = String(line || '').trim()
+  if (row.startsWith('|')) row = row.slice(1)
+  if (row.endsWith('|')) row = row.slice(0, -1)
+  return row.split('|').map((cell) => cell.trim())
+}
+
+function isTableSeparator(line) {
+  let row = String(line || '').trim()
+  if (row.startsWith('|')) row = row.slice(1)
+  if (row.endsWith('|')) row = row.slice(0, -1)
+  const parts = row.split('|').map((part) => part.trim())
+  return parts.length >= 2 && parts.every((part) => /^:?-{3,}:?$/.test(part))
+}
+
+function renderTableBlock(lines) {
+  if (lines.length < 2 || !isTableSeparator(lines[1])) return ''
+  const headers = splitTableRow(lines[0])
+  if (headers.length < 2) return ''
+
+  const bodyRows = lines
+    .slice(2)
+    .filter((line) => line.trim())
+    .map((line) => {
+      const parsed = splitTableRow(line)
+      return Array.from({ length: headers.length }, (_, index) => parsed[index] || '')
+    })
+
+  const headHtml = headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('')
+  const bodyHtml = bodyRows
+    .map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`)
+    .join('')
+
+  return `<div class="md-table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`
+}
+
+function renderTextBlock(block) {
+  const lines = block.split('\n').map((line) => line.trimEnd())
+  const nonEmpty = lines.filter((line) => line.trim())
+  if (!nonEmpty.length) return ''
+
+  const isList = nonEmpty.every((line) => /^[-*]\s+/.test(line))
+  if (isList) {
+    const items = nonEmpty
+      .map((line) => line.replace(/^[-*]\s+/, '').trim())
+      .map((item) => `<li>${renderInlineMarkdown(item)}</li>`)
+      .join('')
+    return `<ul>${items}</ul>`
+  }
+
+  return `<p>${lines.map((line) => renderInlineMarkdown(line)).join('<br>')}</p>`
+}
+
+function renderRichContent(content) {
+  const raw = String(content || '').replace(/\r\n/g, '\n').trim()
+  if (!raw) return ''
+
+  return raw
+    .split(/\n{2,}/)
+    .map((block) => {
+      const lines = block.split('\n').map((line) => line.trim()).filter(Boolean)
+      if (lines.length >= 2 && lines[0].includes('|') && isTableSeparator(lines[1])) {
+        const tableHtml = renderTableBlock(lines)
+        if (tableHtml) return tableHtml
+      }
+      return renderTextBlock(block)
+    })
+    .filter(Boolean)
+    .join('')
+}
+
 async function scrollToBottom() {
   await nextTick()
   if (!messagesRef.value) return
@@ -647,10 +735,51 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.chat-message p {
-  margin: 0;
+.chat-content {
   line-height: 1.45;
+}
+
+.chat-content p {
+  margin: 0;
   white-space: pre-wrap;
+}
+
+.chat-content ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.chat-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: rgba(15, 23, 42, 0.08);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.md-table-wrap {
+  overflow-x: auto;
+}
+
+.md-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.md-table-wrap th,
+.md-table-wrap td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table-wrap th {
+  background: var(--surface-soft);
+  font-weight: 700;
 }
 
 .chat-message time {
