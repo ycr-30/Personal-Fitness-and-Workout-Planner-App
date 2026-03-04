@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -6,13 +7,14 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# Always load backend/.env before importing modules that read env at import time.
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(dotenv_path=BASE_DIR / ".env", override=True)
+
 from agents.model_manager import manager
 from agents.nutrition_agent import answer as nutrition_answer
 from agents.router import route
 from agents.workout_agent import answer as workout_answer
-
-# Force values from local .env to override inherited process env vars.
-load_dotenv(dotenv_path=".env", override=True)
 
 app = FastAPI(title="KeepFit Multi-Agent API", version="0.1.0")
 

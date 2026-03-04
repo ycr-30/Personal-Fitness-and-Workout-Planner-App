@@ -21,6 +21,23 @@ class ModelManager:
     _loaded = False
 
     def __init__(self) -> None:
+        self.base_model_id = "meta-llama/Llama-3.1-8B-Instruct"
+        self.adapter_workout = None
+        self.adapter_nutrition = None
+        self.hf_token = None
+
+        self.max_new_tokens = 260
+        self.max_input_tokens = 1536
+        self.model_max_memory_gpu = "12GiB"
+        self.model_max_memory_cpu = "48GiB"
+        self.force_4bit = False
+
+        self.tok: Any = None
+        self.base: Any = None
+        self.model: Any = None
+        self._refresh_from_env()
+
+    def _refresh_from_env(self) -> None:
         self.base_model_id = os.getenv("BASE_MODEL_ID", "meta-llama/Llama-3.1-8B-Instruct")
         self.adapter_workout = os.getenv("ADAPTER_WORKOUT")
         self.adapter_nutrition = os.getenv("ADAPTER_NUTRITION")
@@ -31,10 +48,6 @@ class ModelManager:
         self.model_max_memory_gpu = os.getenv("MODEL_MAX_MEMORY_GPU", "12GiB")
         self.model_max_memory_cpu = os.getenv("MODEL_MAX_MEMORY_CPU", "48GiB")
         self.force_4bit = _as_bool(os.getenv("FORCE_4BIT"), default=False)
-
-        self.tok: Any = None
-        self.base: Any = None
-        self.model: Any = None
 
     @property
     def is_loaded(self) -> bool:
@@ -67,6 +80,7 @@ class ModelManager:
         with ModelManager._load_lock:
             if ModelManager._loaded:
                 return
+            self._refresh_from_env()
 
             if self.hf_token:
                 login(token=self.hf_token, add_to_git_credential=False)
