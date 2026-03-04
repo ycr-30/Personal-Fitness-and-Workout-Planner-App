@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 from dotenv import load_dotenv
@@ -17,6 +18,7 @@ from agents.router import route
 from agents.workout_agent import answer as workout_answer
 
 app = FastAPI(title="KeepFit Multi-Agent API", version="0.1.0")
+CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 class ChatReq(BaseModel):
@@ -86,6 +88,10 @@ def _extract_external_evidence(req: ChatReq) -> list[dict[str, Any]]:
             }
         )
     return evidence
+
+
+def _contains_cjk(text: str) -> bool:
+    return bool(CJK_RE.search(text or ""))
 
 
 app.add_middleware(
@@ -159,7 +165,10 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
         use_rag=req.use_rag,
         external_evidence=external_evidence,
     )
-    merged = "WORKOUT ADVICE:\n" + out_w + "\n\nNUTRITION ADVICE:\n" + out_n
+    if _contains_cjk(message):
+        merged = "训练建议:\n" + out_w + "\n\n饮食建议:\n" + out_n
+    else:
+        merged = "WORKOUT ADVICE:\n" + out_w + "\n\nNUTRITION ADVICE:\n" + out_n
     response = {
         "route": "both",
         "answer": merged,

@@ -1,9 +1,51 @@
 import json
+import re
 from typing import Any
 
 from .model_manager import manager
 from .prompts import WORKOUT_SYSTEM_PROMPT
 from .rag import retrieve
+
+PLACEHOLDER_RE = re.compile(r"<[^>\n]{1,80}>|\{\{[^}\n]{1,80}\}\}|\[[A-Za-z_ ]{1,40}\]")
+CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _contains_cjk(text: str) -> bool:
+    return bool(CJK_RE.search(text or ""))
+
+
+def _needs_rewrite(user_message: str, answer: str) -> bool:
+    text = (answer or "").strip()
+    if not text:
+        return True
+    if PLACEHOLDER_RE.search(text):
+        return True
+    if _contains_cjk(user_message) and not _contains_cjk(text):
+        return True
+    return False
+
+
+def _fallback_clean(text: str) -> str:
+    return PLACEHOLDER_RE.sub("（请补充具体信息）", text or "")
+
+
+def _rewrite_answer(user_message: str, draft_answer: str) -> str:
+    rewrite_user = (
+        "Rewrite the draft answer so it is directly usable.\n"
+        "Rules:\n"
+        "- Keep the same language as the original user question.\n"
+        "- Do NOT output placeholders such as <...>, [X], {{...}}, TBD, N/A, null.\n"
+        "- Do NOT output JSON.\n"
+        "- Keep advice concrete and actionable.\n"
+        "- Ask at most ONE concise follow-up question only if critical info is missing.\n\n"
+        f"Original user question:\n{user_message}\n\n"
+        f"Draft answer:\n{draft_answer}"
+    )
+    rewrite_msgs = [
+        {"role": "system", "content": WORKOUT_SYSTEM_PROMPT},
+        {"role": "user", "content": rewrite_user},
+    ]
+    return manager.generate(rewrite_msgs, adapter="workout")
 
 
 def _normalize_external_evidence(external_evidence: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -65,4 +107,9 @@ def answer(
         {"role": "user", "content": user_block},
     ]
     out = manager.generate(msgs, adapter="workout")
+    if _needs_rewrite(message, out):
+        rewritten = _rewrite_answer(message, out).strip()
+        if rewritten:
+            out = rewritten
+    out = _fallback_clean(out).strip()
     return out, evidence
