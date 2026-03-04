@@ -11,7 +11,8 @@ from agents.nutrition_agent import answer as nutrition_answer
 from agents.router import route
 from agents.workout_agent import answer as workout_answer
 
-load_dotenv()
+# Force values from local .env to override inherited process env vars.
+load_dotenv(dotenv_path=".env", override=True)
 
 app = FastAPI(title="KeepFit Multi-Agent API", version="0.1.0")
 
