@@ -8,6 +8,7 @@ import Register from '@/pages/auth/Register.vue'
 import Dashboard from '@/pages/app/Dashboard.vue'
 import Plans from '@/pages/app/Plans.vue'
 import Progress from '@/pages/app/Progress.vue'
+import Schedule from '@/pages/app/Schedule.vue'
 import Nutrition from '@/pages/app/Nutrition.vue'
 import Logs from '@/pages/app/Logs.vue'
 import MuscleMap from '@/pages/app/MuscleMap.vue'
@@ -21,7 +22,9 @@ const routes = [
   { path: '/register', name: 'register', component: Register, meta: { guestOnly: true, hideShell: true } }, // 注册
   { path: '/onboarding', name: 'onboarding', component: Onboarding, meta: { requiresAuth: true, hideShell: true } }, // 登录后信息调查
   { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { requiresAuth: true } }, // 登录后主页
-  { path: '/plans', name: 'plans', component: Plans, meta: { requiresAuth: true } },
+  { path: '/schedule', name: 'schedule', component: Schedule, meta: { requiresAuth: true } },
+  { path: '/plan', name: 'plan', component: Plans, meta: { requiresAuth: true } },
+  { path: '/plans', redirect: '/plan' },
   { path: '/progress', name: 'progress', component: Progress, meta: { requiresAuth: true } },
   { path: '/nutrition', name: 'nutrition', component: Nutrition, meta: { requiresAuth: true } },
   { path: '/logs', name: 'logs', component: Logs, meta: { requiresAuth: true } },

@@ -1538,7 +1538,7 @@ const selectedTitle = computed(() => {
 })
 
 function openSchedule() {
-  showSchedule.value = true
+  router.push('/schedule')
 }
 
 function closeSchedule() {

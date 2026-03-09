@@ -686,6 +686,12 @@
                 <span>{{ filter.label }}</span>
               </label>
             </div>
+            <div v-else-if="activeModal === 'challengeTarget'" class="detail-grid">
+              <label class="field">
+                <span>{{ activeChallenge?.title }} target ({{ activeChallenge?.unit }})</span>
+                <input v-model.number="modalForm.challengeTarget" type="number" min="0" step="1" placeholder="Please input" />
+              </label>
+            </div>
             <div v-else-if="activeModal === 'weightDetails'" class="weight-detail">
               <div class="weight-top">
                 <div class="weight-title">
@@ -918,6 +924,7 @@ const defaultRelatedFilters = {
   sleep: true
 }
 const activeModal = ref(null)
+const activeChallengeId = ref(null)
 const weightDetailMetric = ref('weight')
 const weightDetailRange = ref('total')
 const weightRangeOffset = ref(0)
@@ -938,6 +945,7 @@ const modalForm = reactive({
   fatEfficiency: '',
   bodyProfile: '',
   bodyProfileNote: '',
+  challengeTarget: '',
   filters: { ...defaultRelatedFilters }
 })
 
@@ -1279,6 +1287,7 @@ const focusOptions = computed(() => selectedGoal.value?.focusOptions ?? [])
 const selectedChallengesData = computed(() =>
   planState.selectedChallenges.map((id) => challengeMap[id]).filter(Boolean)
 )
+const activeChallenge = computed(() => challengeMap[activeChallengeId.value] || null)
 
 const activeDetailType = computed(() => {
   if (!selectedGoal.value) return null
@@ -1635,6 +1644,13 @@ const modalSubtitle = computed(() => {
 })
 
 const modalCopy = computed(() => {
+  if (activeModal.value === 'challengeTarget' && activeChallenge.value) {
+    return {
+      title: activeChallenge.value.title,
+      subtitle: `Adjust your ${cadenceLabel(activeChallenge.value.cadence).toLowerCase()} target.`
+    }
+  }
+
   const copyMap = {
     intake: {
       title: 'Food intake',
@@ -1721,16 +1737,29 @@ function openUpdateSheetFromDetails() {
 }
 
 function isChallengeModal(id) {
-  return id === 'intake' || id === 'deficit'
+  return Boolean(challengeMap[id])
 }
 
 function openChallengeModal(id) {
   if (!isChallengeModal(id)) return
-  openModal(id)
+  openModal('challengeTarget', id)
 }
 
-function openModal(type) {
+function openModal(type, challengeId = null) {
   activeModal.value = type
+  if (type !== 'challengeTarget') {
+    activeChallengeId.value = null
+  }
+  if (type === 'challengeTarget') {
+    const challenge = challengeMap[challengeId]
+    if (!challenge) {
+      activeModal.value = null
+      return
+    }
+    activeChallengeId.value = challengeId
+    modalForm.challengeTarget = normalizeNumber(planState.challengeValues[challengeId])
+    return
+  }
   if (type === 'intake') {
     modalForm.intakeKcal = planState.dailyLogs.intakeKcal ?? ''
     modalForm.intakeNote = planState.dailyLogs.intakeNote ?? ''
@@ -1765,10 +1794,21 @@ function openModal(type) {
 
 function closeModal() {
   activeModal.value = null
+  activeChallengeId.value = null
 }
 
 function saveModal() {
   if (!activeModal.value) return
+  if (activeModal.value === 'challengeTarget') {
+    const challenge = activeChallenge.value
+    if (challenge) {
+      const target = toNumber(modalForm.challengeTarget)
+      planState.challengeValues[challenge.id] = target != null ? Math.max(0, target) : 0
+      onChallengeValueInput()
+    }
+    closeModal()
+    return
+  }
   if (activeModal.value === 'intake') {
     planState.dailyLogs.intakeKcal = normalizeNumber(modalForm.intakeKcal)
     planState.dailyLogs.intakeNote = (modalForm.intakeNote || '').trim()
@@ -1830,6 +1870,105 @@ function selectFocus(focusId) {
   applyFocusDefaults(focusId)
 }
 
+function isValueMissing(value) {
+  if (value === null || value === undefined) return true
+  if (typeof value === 'string') return value.trim() === ''
+  return false
+}
+
+function getGoalDetailMissingFields() {
+  const missing = []
+  const detailType = activeDetailType.value
+
+  const requireField = (label, value) => {
+    if (isValueMissing(value)) missing.push(label)
+  }
+
+  if (focusOptions.value.length && !planState.focusId) {
+    requireField('Focus', planState.focusId)
+  }
+
+  if (detailType === 'weight-loss' || detailType === 'weight-gain') {
+    requireField('Start (kg)', planState.weight.start)
+    requireField('Target (kg)', planState.weight.target)
+    requireField('Target date', planState.weight.targetDate)
+    return missing
+  }
+
+  if (detailType === 'circumference-reduce' || detailType === 'circumference-increase') {
+    requireField('Start (cm)', planState.circumference.start)
+    requireField('Target (cm)', planState.circumference.target)
+    requireField('Target date', planState.circumference.targetDate)
+    return missing
+  }
+
+  if (detailType === 'posture') {
+    requireField('Start (score)', planState.posture.start)
+    requireField('Target (score)', planState.posture.target)
+    requireField('Target date', planState.posture.targetDate)
+    return missing
+  }
+
+  if (detailType === 'running') {
+    requireField('Weekly distance (km)', planState.running.weeklyDistance)
+    requireField('5K target time (min)', planState.running.fiveKTime)
+    requireField('Longest run (min)', planState.running.longRunTime)
+    requireField('Target date', planState.running.targetDate)
+    return missing
+  }
+
+  if (detailType === 'health-frequency') {
+    requireField('Sessions per week', planState.health.frequency)
+    requireField('Minutes per session', planState.health.sessionMinutes)
+    requireField('Target date', planState.health.targetDate)
+    return missing
+  }
+
+  if (detailType === 'health-running') {
+    requireField('Run distance (km/week)', planState.health.runDistance)
+    requireField('Target date', planState.health.targetDate)
+    return missing
+  }
+
+  if (detailType === 'health-cycling') {
+    requireField('Ride distance (km/week)', planState.health.rideDistance)
+    requireField('Target date', planState.health.targetDate)
+    return missing
+  }
+
+  if (detailType === 'health-sleep') {
+    requireField('Sleep hours/night', planState.health.sleepHours)
+    requireField('Target date', planState.health.targetDate)
+    return missing
+  }
+
+  if (detailType === 'strength') {
+    requireField('Bench 1RM (kg)', planState.performance.strength.bench)
+    requireField('Squat 1RM (kg)', planState.performance.strength.squat)
+    requireField('Deadlift 1RM (kg)', planState.performance.strength.deadlift)
+    requireField('Target date', planState.performance.targetDate)
+    return missing
+  }
+
+  if (detailType === 'endurance') {
+    requireField('Plank (sec)', planState.performance.endurance.plank)
+    requireField('Push-ups', planState.performance.endurance.pushups)
+    requireField('Row 2KM (min)', planState.performance.endurance.rowTime)
+    requireField('Target date', planState.performance.targetDate)
+    return missing
+  }
+
+  return missing
+}
+
+function showMissingFieldsAlert(fields) {
+  if (!fields.length) return
+  const message = `请填写：${fields.join('、')}`
+  if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(message)
+  }
+}
+
 function goPrevStep() {
   if (modalStep.value === 1) {
     closeGoalModal()
@@ -1843,8 +1982,15 @@ function goNextStep() {
     confirmChallenges()
     return
   }
-  if (modalStep.value === 2 && isWeightLoss.value) {
-    applyWeightLossRecommendations()
+  if (modalStep.value === 2) {
+    const missingFields = getGoalDetailMissingFields()
+    if (missingFields.length) {
+      showMissingFieldsAlert(missingFields)
+      return
+    }
+    if (isWeightLoss.value) {
+      applyWeightLossRecommendations()
+    }
   }
   modalStep.value += 1
 }
@@ -3435,12 +3581,12 @@ watch(
 
 .level-bar .marker {
   position: absolute;
-  top: -6px;
-  width: 10px;
-  height: 10px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
   background: var(--text-primary);
   border-radius: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
 }
 
 .range-tabs {

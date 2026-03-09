@@ -956,6 +956,101 @@ async function generateAssistantReply({ userMessage, user, history, userId }) {
   }
 }
 
+function numericValue(value, fallback = 0) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function buildHeuristicAnalyticsInsight(summary, rangeDays) {
+  const totals = summary?.totals || {}
+  const streaks = summary?.streaks || {}
+  const challenges = Array.isArray(summary?.challenges) ? summary.challenges : []
+  const muscles = Array.isArray(summary?.muscles) ? summary.muscles : []
+  const weightTrend = summary?.weight?.trend || null
+
+  const sessions = numericValue(totals.sessions, 0)
+  const completionRate = numericValue(totals.completionRate, 0)
+  const totalMinutes = numericValue(totals.minutes, 0)
+  const avgDailyMinutes = numericValue(totals.avgDailyMinutes, 0)
+  const currentStreak = numericValue(streaks.current, 0)
+  const bestStreak = numericValue(streaks.best, 0)
+  const weightChange = numericValue(weightTrend?.changeKg, 0)
+
+  const strongChallenges = challenges
+    .filter((item) => numericValue(item.progressPercent, 0) >= 100)
+    .map((item) => item.title)
+    .slice(0, 2)
+
+  const weakChallenges = challenges
+    .filter((item) => numericValue(item.progressPercent, 0) > 0 && numericValue(item.progressPercent, 0) < 70)
+    .map((item) => item.title)
+    .slice(0, 2)
+
+  const topFocus = muscles[0]?.name || 'General training'
+  const minutesTarget = rangeDays >= 30 ? 180 : 150
+
+  const conclusion = []
+  conclusion.push(
+    `Key conclusions: In the last ${rangeDays} days, you logged ${sessions} sessions with a ${completionRate}% completion rate and ${totalMinutes} total minutes.`
+  )
+  conclusion.push(
+    `Your current streak is ${currentStreak} days (best ${bestStreak} days), and your top focus area was ${topFocus}.`
+  )
+  if (weightTrend) {
+    const weightText =
+      weightChange > 0 ? `up ${weightChange.toFixed(1)} kg` : weightChange < 0 ? `down ${Math.abs(weightChange).toFixed(1)} kg` : 'stable'
+    conclusion.push(`Weight trend is ${weightText} versus the previous period.`)
+  }
+
+  const risks = []
+  if (completionRate < 65) {
+    risks.push('Completion is below target. Session scheduling or workload may be too aggressive.')
+  }
+  if (avgDailyMinutes < 20) {
+    risks.push('Daily movement volume is low for progression. Consistency is the main bottleneck.')
+  }
+  if (!risks.length) {
+    risks.push('No major red flags, but maintain progression and recovery balance.')
+  }
+  if (weakChallenges.length) {
+    risks.push(`Low adherence challenges: ${weakChallenges.join(', ')}.`)
+  }
+
+  const actions = []
+  actions.push(`Training: lock at least 4 planned training days and target ${minutesTarget}+ minutes per week.`)
+  actions.push('Recovery: keep one full rest day and include 1 lighter session after high-intensity days.')
+  actions.push('Nutrition: prioritize protein each meal and keep hydration steady around workouts.')
+  if (strongChallenges.length) {
+    actions.push(`Keep momentum on strong metrics: ${strongChallenges.join(', ')}.`)
+  }
+  if (weakChallenges.length) {
+    actions.push(`For the next 7 days, focus first on improving: ${weakChallenges.join(', ')}.`)
+  }
+
+  return [
+    conclusion.join(' '),
+    '',
+    `Risks / bottlenecks: ${risks.join(' ')}`,
+    '',
+    `Next 7-day action plan: ${actions.join(' ')}`
+  ].join('\n')
+}
+
+function buildAnalyticsPrompt(summary, rangeDays) {
+  const summaryText = JSON.stringify(summary || {})
+  const trimmedSummary = summaryText.length > 4500 ? `${summaryText.slice(0, 4500)}...` : summaryText
+  return [
+    'You are a senior fitness performance analyst for KeepFit.',
+    `Analyze the following user training summary for the last ${rangeDays} days.`,
+    'Return concise, practical guidance in exactly three sections:',
+    '1) Key conclusions',
+    '2) Risks / bottlenecks',
+    '3) Next 7-day action plan (training, nutrition, recovery)',
+    'Use concrete numbers from the summary and do not mention missing model endpoints or retrieval internals.',
+    `Summary JSON:\n${trimmedSummary}`
+  ].join('\n\n')
+}
+
 async function findOrCreateUser(profile) {
   const normalizedEmail =
     typeof profile.email === 'string' && profile.email.trim()
@@ -1410,6 +1505,61 @@ app.post('/api/ai/chat/messages', requireAuth, async (req, res) => {
     console.error('Failed to send AI chat message', err)
     res.status(500).json({ error: 'Failed to send message' })
   }
+})
+
+app.post('/api/ai/analytics/insights', requireAuth, async (req, res) => {
+  const userId = Number(req.session.id)
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'Invalid user session.' })
+  }
+
+  const requestedRange = Number.parseInt(req.body?.rangeDays, 10)
+  const rangeDays =
+    Number.isInteger(requestedRange) && requestedRange > 0
+      ? Math.min(Math.max(requestedRange, 7), 180)
+      : 30
+  const summary = req.body?.summary && typeof req.body.summary === 'object' ? req.body.summary : {}
+
+  const fallbackInsight = buildHeuristicAnalyticsInsight(summary, rangeDays)
+  let insight = fallbackInsight
+  let source = 'heuristic'
+  let usedFallback = true
+
+  try {
+    const user = await findUserById(userId)
+    const prompt = buildAnalyticsPrompt(summary, rangeDays)
+    const assistantReply = await generateAssistantReply({
+      userMessage: prompt,
+      user,
+      history: [],
+      userId
+    })
+    const aiContent = normalizeMessageText(assistantReply?.content || '')
+    const looksGenericFallback =
+      /retrieval fallback|model endpoint not connected|saved your message/i.test(aiContent)
+
+    if (aiContent && !assistantReply?.usedFallback && !looksGenericFallback) {
+      insight = aiContent
+      source = 'ai'
+      usedFallback = false
+    } else if (aiContent && !looksGenericFallback) {
+      insight = aiContent
+      source = 'ai_fallback'
+      usedFallback = true
+    }
+  } catch (err) {
+    console.error('Failed to generate analytics insights', err)
+  }
+
+  return res.json({
+    ok: true,
+    insight,
+    meta: {
+      source,
+      usedFallback,
+      generatedAt: new Date().toISOString()
+    }
+  })
 })
 
 app.listen(PORT, () => {
