@@ -28,12 +28,19 @@
         </svg>
         <span>Workout Log</span>
       </RouterLink>
-      <RouterLink class="nav-link" to="/plans">
+      <RouterLink class="nav-link" to="/schedule">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.5" fill="none" />
           <path d="M8 3v4M16 3v4M7 11h10M7 15h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         </svg>
         <span>Schedule</span>
+      </RouterLink>
+      <RouterLink class="nav-link" to="/plan">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 4h9l3 3v13H6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+          <path d="M15 4v3h3M9 11h6M9 15h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+        <span>Plan</span>
       </RouterLink>
       <RouterLink class="nav-link" to="/progress">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -72,7 +79,7 @@
           <div class="goal-bar">
             <span :style="{ width: `${goalProgress}%` }"></span>
           </div>
-          <span class="goal-count">{{ weeklyCompleted }}/{{ weeklyTotal }}</span>
+          <span class="goal-count">{{ weeklyCompleted }}/{{ weeklyPending }}</span>
         </div>
         <p>{{ goalMessage }}</p>
       </div>
@@ -91,6 +98,31 @@ const auth = useAuthStore()
 const storageKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
 const logs = ref([])
 
+function parseLocalDate(value) {
+  if (!value) return null
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value))
+  if (match) {
+    const [, year, month, day] = match
+    return new Date(Number(year), Number(month) - 1, Number(day))
+  }
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function startOfWeek(date) {
+  const next = new Date(date)
+  next.setHours(0, 0, 0, 0)
+  next.setDate(next.getDate() - next.getDay())
+  return next
+}
+
+function endOfWeek(date) {
+  const next = startOfWeek(date)
+  next.setDate(next.getDate() + 6)
+  next.setHours(23, 59, 59, 999)
+  return next
+}
+
 function loadLogs() {
   if (typeof window === 'undefined') return
   const raw = localStorage.getItem(storageKey.value)
@@ -107,24 +139,39 @@ function loadLogs() {
   }
 }
 
-const weeklyTotal = computed(() => {
-  return logs.value.length
+const currentWeekLogs = computed(() => {
+  const today = new Date()
+  const weekStart = startOfWeek(today)
+  const weekEnd = endOfWeek(today)
+  return logs.value.filter((item) => {
+    const date = parseLocalDate(item?.date)
+    return date && date >= weekStart && date <= weekEnd
+  })
 })
 
 const weeklyCompleted = computed(() => {
-  return logs.value.filter((item) => item.status === 'completed').length
+  return currentWeekLogs.value.filter((item) => item.status === 'completed').length
+})
+
+const weeklyPending = computed(() => {
+  return currentWeekLogs.value.filter((item) => item.status !== 'completed').length
+})
+
+const weeklyTarget = computed(() => {
+  return weeklyCompleted.value + weeklyPending.value
 })
 
 const goalProgress = computed(() => {
-  if (!weeklyTotal.value) return 0
-  const progress = (weeklyCompleted.value / weeklyTotal.value) * 100
+  if (!weeklyTarget.value) return 0
+  const progress = (weeklyCompleted.value / weeklyTarget.value) * 100
   return Math.min(100, Math.max(0, Math.round(progress)))
 })
 
 const goalMessage = computed(() => {
-  if (weeklyTotal.value === 0) return 'No workouts scheduled yet.'
-  if (weeklyCompleted.value < weeklyTotal.value) return 'Complete your scheduled sessions.'
-  return 'All planned workouts completed.'
+  if (weeklyTarget.value === 0) return 'No workouts scheduled this week.'
+  if (weeklyPending.value > 0 && weeklyCompleted.value === 0) return 'Start this week’s scheduled sessions.'
+  if (weeklyPending.value > 0) return 'Keep going on the remaining sessions.'
+  return 'All scheduled sessions for this week are done.'
 })
 
 function handleStorage(event) {
