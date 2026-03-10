@@ -8,10 +8,19 @@ from .rag import retrieve
 
 PLACEHOLDER_RE = re.compile(r"<[^>\n]{1,80}>|\{\{[^}\n]{1,80}\}\}|\[[A-Za-z_ ]{1,40}\]")
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+LATIN_WORD_RE = re.compile(r"\b[A-Za-z]{3,}\b")
 
 
 def _contains_cjk(text: str) -> bool:
     return bool(CJK_RE.search(text or ""))
+
+
+def _latin_word_count(text: str) -> int:
+    return len(LATIN_WORD_RE.findall(text or ""))
+
+
+def _is_cjk_user_message(text: str) -> bool:
+    return _contains_cjk(text)
 
 
 def _needs_rewrite(user_message: str, answer: str) -> bool:
@@ -20,7 +29,11 @@ def _needs_rewrite(user_message: str, answer: str) -> bool:
         return True
     if PLACEHOLDER_RE.search(text):
         return True
-    if _contains_cjk(user_message) and not _contains_cjk(text):
+    if _is_cjk_user_message(user_message) and not _contains_cjk(text):
+        return True
+    if _is_cjk_user_message(user_message) and _latin_word_count(text) >= 6:
+        return True
+    if not _is_cjk_user_message(user_message) and _contains_cjk(text):
         return True
     return False
 
@@ -30,10 +43,12 @@ def _fallback_clean(text: str) -> str:
 
 
 def _rewrite_answer(user_message: str, draft_answer: str) -> str:
+    target_language = "Chinese" if _is_cjk_user_message(user_message) else "English"
     rewrite_user = (
         "Rewrite the draft answer so it is directly usable.\n"
         "Rules:\n"
-        "- Keep the same language as the original user question.\n"
+        f"- Output only in {target_language}.\n"
+        "- Do not mix languages in the same answer.\n"
         "- Do NOT output placeholders such as <...>, [X], {{...}}, TBD, N/A, null.\n"
         "- Do NOT output JSON.\n"
         "- Keep advice concrete and actionable.\n"
