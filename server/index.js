@@ -428,6 +428,15 @@ function normalizeMessageRole(value) {
   return 'user'
 }
 
+function normalizeAppStatePayload(payload) {
+  const source = payload && typeof payload === 'object' ? payload : {}
+  return {
+    planState: source.planState && typeof source.planState === 'object' ? source.planState : null,
+    workoutLogs: Array.isArray(source.workoutLogs) ? source.workoutLogs : [],
+    restDays: Array.isArray(source.restDays) ? source.restDays : []
+  }
+}
+
 function extractAssistantContent(payload) {
   if (!payload || typeof payload !== 'object') return ''
 
@@ -1305,6 +1314,64 @@ app.post('/profile', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Profile update error', err)
     res.status(500).json({ error: 'Failed to update profile' })
+  }
+})
+
+app.get('/api/user/app-state', requireAuth, async (req, res) => {
+  try {
+    const userId = Number(req.session.id)
+    const appState = await prisma.userAppState.findUnique({
+      where: { userId }
+    })
+
+    res.json({
+      ok: true,
+      appState: {
+        planState: appState?.planState ?? null,
+        workoutLogs: Array.isArray(appState?.workoutLogs) ? appState.workoutLogs : [],
+        restDays: Array.isArray(appState?.restDays) ? appState.restDays : [],
+        updatedAt: appState?.updatedAt || null
+      }
+    })
+  } catch (err) {
+    console.error('Failed to load user app state', err)
+    res.status(500).json({ error: 'Failed to load app state' })
+  }
+})
+
+app.post('/api/user/app-state', requireAuth, async (req, res) => {
+  try {
+    const userId = Number(req.session.id)
+    const normalized = normalizeAppStatePayload(req.body)
+
+    const appState = await prisma.userAppState.upsert({
+      where: { userId },
+      update: {
+        planState: normalized.planState,
+        workoutLogs: normalized.workoutLogs,
+        restDays: normalized.restDays,
+        updatedAt: new Date()
+      },
+      create: {
+        userId,
+        planState: normalized.planState,
+        workoutLogs: normalized.workoutLogs,
+        restDays: normalized.restDays
+      }
+    })
+
+    res.json({
+      ok: true,
+      appState: {
+        planState: appState.planState ?? null,
+        workoutLogs: Array.isArray(appState.workoutLogs) ? appState.workoutLogs : [],
+        restDays: Array.isArray(appState.restDays) ? appState.restDays : [],
+        updatedAt: appState.updatedAt
+      }
+    })
+  } catch (err) {
+    console.error('Failed to save user app state', err)
+    res.status(500).json({ error: 'Failed to save app state' })
   }
 })
 

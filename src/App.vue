@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/auth'
 import AppHeader from '@/components/AppHeader.vue'
 import FloatingCoachChat from '@/components/FloatingCoachChat.vue'
 import { syncLocalDataToSupabase, hydrateLocalDataFromSupabase } from '@/lib/supabaseSync'
+import { applyCloudAppStateToLocal, fetchCloudAppState, saveLocalAppStateToCloud } from '@/lib/cloudStateApi'
 import { getIdentityFromUser, getUserStorageKey } from '@/lib/userStorage'
 
 const route = useRoute()
@@ -45,6 +46,11 @@ function connectedKeyForUser(user) {
   return `pf_supabase_connected_${identity}`
 }
 
+function backendSyncKeyForUser(user) {
+  const identity = getIdentityFromUser(user)
+  return `pf_backend_sync_done_${identity}`
+}
+
 const preferredTheme = computed(() => auth.user?.theme || 'light')
 const resolvedTheme = computed(() =>
   preferredTheme.value === 'system' ? systemTheme.value : preferredTheme.value
@@ -65,6 +71,7 @@ watch(
     if (!identity || !auth.user || syncInProgress.value) return
     const key = syncKeyForUser(auth.user)
     const connectedKey = connectedKeyForUser(auth.user)
+    const backendKey = backendSyncKeyForUser(auth.user)
     const alreadyConnected = localStorage.getItem(connectedKey) === '1'
 
     const hasLocalData =
@@ -72,11 +79,37 @@ watch(
       localStorage.getItem(getUserStorageKey('pf_workout_logs', auth.user)) ||
       localStorage.getItem(getUserStorageKey('pf_rest_days', auth.user))
 
+    let hydratedFromBackend = false
     if (!hasLocalData) {
       try {
-        await hydrateLocalDataFromSupabase()
+        const cloudState = await fetchCloudAppState()
+        const hasCloudData =
+          cloudState?.planState ||
+          (Array.isArray(cloudState?.workoutLogs) && cloudState.workoutLogs.length > 0) ||
+          (Array.isArray(cloudState?.restDays) && cloudState.restDays.length > 0)
+        if (hasCloudData) {
+          applyCloudAppStateToLocal(auth.user, cloudState)
+          hydratedFromBackend = true
+        }
       } catch (error) {
-        console.error('Cloud hydrate failed', error)
+        console.error('Backend cloud hydrate failed', error)
+      }
+
+      if (!hydratedFromBackend) {
+        try {
+          await hydrateLocalDataFromSupabase()
+        } catch (error) {
+          console.error('Cloud hydrate failed', error)
+        }
+      }
+    }
+
+    if (hasLocalData && localStorage.getItem(backendKey) !== '1') {
+      try {
+        await saveLocalAppStateToCloud(auth.user)
+        localStorage.setItem(backendKey, '1')
+      } catch (error) {
+        console.error('Backend cloud sync failed', error)
       }
     }
 
@@ -103,6 +136,11 @@ function scheduleAutoSync() {
     clearTimeout(syncTimer.value)
   }
   syncTimer.value = setTimeout(async () => {
+    try {
+      await saveLocalAppStateToCloud(auth.user)
+    } catch (error) {
+      console.error('Backend cloud sync failed', error)
+    }
     try {
       await syncLocalDataToSupabase({ interactive: false })
     } catch (error) {

@@ -640,6 +640,10 @@
             </div>
             <div v-else-if="activeModal === 'circumference'" class="detail-grid">
               <label class="field">
+                <span>Measurement date</span>
+                <input v-model="modalForm.circumferenceDate" type="date" />
+              </label>
+              <label class="field">
                 <span>Chest (cm)</span>
                 <input v-model.number="modalForm.circumference.chest" type="number" placeholder="Please input" />
               </label>
@@ -652,16 +656,28 @@
                 <input v-model.number="modalForm.circumference.hip" type="number" placeholder="Please input" />
               </label>
               <label class="field">
-                <span>Thigh (cm)</span>
-                <input v-model.number="modalForm.circumference.thigh" type="number" placeholder="Please input" />
+                <span>Left thigh (cm)</span>
+                <input v-model.number="modalForm.circumference.leftThigh" type="number" placeholder="Please input" />
               </label>
               <label class="field">
-                <span>Calf (cm)</span>
-                <input v-model.number="modalForm.circumference.calf" type="number" placeholder="Please input" />
+                <span>Right thigh (cm)</span>
+                <input v-model.number="modalForm.circumference.rightThigh" type="number" placeholder="Please input" />
               </label>
               <label class="field">
-                <span>Arm (cm)</span>
-                <input v-model.number="modalForm.circumference.arm" type="number" placeholder="Please input" />
+                <span>Left calf (cm)</span>
+                <input v-model.number="modalForm.circumference.leftCalf" type="number" placeholder="Please input" />
+              </label>
+              <label class="field">
+                <span>Right calf (cm)</span>
+                <input v-model.number="modalForm.circumference.rightCalf" type="number" placeholder="Please input" />
+              </label>
+              <label class="field">
+                <span>Left arm (cm)</span>
+                <input v-model.number="modalForm.circumference.leftArm" type="number" placeholder="Please input" />
+              </label>
+              <label class="field">
+                <span>Right arm (cm)</span>
+                <input v-model.number="modalForm.circumference.rightArm" type="number" placeholder="Please input" />
               </label>
             </div>
             <div v-else-if="activeModal === 'fatEfficiency'" class="detail-grid">
@@ -934,13 +950,17 @@ const modalForm = reactive({
   deficitKcal: '',
   sleepHours: '',
   sleepQuality: '',
+  circumferenceDate: '',
   circumference: {
     chest: '',
     waist: '',
     hip: '',
-    thigh: '',
-    calf: '',
-    arm: ''
+    leftThigh: '',
+    rightThigh: '',
+    leftCalf: '',
+    rightCalf: '',
+    leftArm: '',
+    rightArm: ''
   },
   fatEfficiency: '',
   bodyProfile: '',
@@ -1030,10 +1050,35 @@ const circumferenceParts = [
   { id: 'chest', label: 'Chest' },
   { id: 'waist', label: 'Waist' },
   { id: 'hip', label: 'Hip' },
-  { id: 'thigh', label: 'Thigh' },
-  { id: 'calf', label: 'Calf' },
-  { id: 'arm', label: 'Arm' }
+  { id: 'leftThigh', label: 'Left thigh' },
+  { id: 'rightThigh', label: 'Right thigh' },
+  { id: 'leftCalf', label: 'Left calf' },
+  { id: 'rightCalf', label: 'Right calf' },
+  { id: 'leftArm', label: 'Left arm' },
+  { id: 'rightArm', label: 'Right arm' }
 ]
+
+function normalizeCircumferenceLog(raw = {}) {
+  const normalized = {
+    chest: raw?.chest ?? '',
+    waist: raw?.waist ?? '',
+    hip: raw?.hip ?? '',
+    leftThigh: raw?.leftThigh ?? raw?.thigh ?? '',
+    rightThigh: raw?.rightThigh ?? raw?.thigh ?? '',
+    leftCalf: raw?.leftCalf ?? raw?.calf ?? '',
+    rightCalf: raw?.rightCalf ?? raw?.calf ?? '',
+    leftArm: raw?.leftArm ?? raw?.arm ?? '',
+    rightArm: raw?.rightArm ?? raw?.arm ?? ''
+  }
+  return normalized
+}
+
+function hasCircumferenceValues(raw = {}) {
+  return Object.values(normalizeCircumferenceLog(raw)).some((value) => {
+    const numeric = toNumber(value)
+    return numeric != null && numeric > 0
+  })
+}
 
 const postureAreas = [
   { id: 'whole', label: 'Whole body' },
@@ -1205,10 +1250,14 @@ function createEmptyPlanState() {
       chest: '',
       waist: '',
       hip: '',
-      thigh: '',
-      calf: '',
-      arm: ''
+      leftThigh: '',
+      rightThigh: '',
+      leftCalf: '',
+      rightCalf: '',
+      leftArm: '',
+      rightArm: ''
     },
+    circumferenceRecords: [],
     fatLossEfficiency: '',
     bodyProfile: {
       summary: '',
@@ -1598,11 +1647,14 @@ const circumferenceDisplay = computed(() => {
     chest: 'Chest',
     waist: 'Waist',
     hip: 'Hip',
-    thigh: 'Thigh',
-    calf: 'Calf',
-    arm: 'Arm'
+    leftThigh: 'Left thigh',
+    rightThigh: 'Right thigh',
+    leftCalf: 'Left calf',
+    rightCalf: 'Right calf',
+    leftArm: 'Left arm',
+    rightArm: 'Right arm'
   }
-  const entries = Object.entries(planState.bodyCircumferenceLog)
+  const entries = Object.entries(normalizeCircumferenceLog(planState.bodyCircumferenceLog))
     .map(([key, value]) => [key, toNumber(value)])
     .filter(([, value]) => value && value > 0)
   if (!entries.length) return 'Please input'
@@ -1772,7 +1824,8 @@ function openModal(type, challengeId = null) {
     modalForm.sleepQuality = planState.dailyLogs.sleepQuality ?? ''
   }
   if (type === 'circumference') {
-    Object.assign(modalForm.circumference, planState.bodyCircumferenceLog)
+    modalForm.circumferenceDate = getTodayISO()
+    Object.assign(modalForm.circumference, normalizeCircumferenceLog(planState.bodyCircumferenceLog))
   }
   if (type === 'fatEfficiency') {
     modalForm.fatEfficiency = planState.fatLossEfficiency ?? ''
@@ -1824,6 +1877,28 @@ function saveModal() {
     Object.keys(planState.bodyCircumferenceLog).forEach((key) => {
       planState.bodyCircumferenceLog[key] = normalizeNumber(modalForm.circumference[key])
     })
+    if (!Array.isArray(planState.circumferenceRecords)) {
+      planState.circumferenceRecords = []
+    }
+    if (hasCircumferenceValues(planState.bodyCircumferenceLog)) {
+      const snapshot = {
+        date: modalForm.circumferenceDate || getTodayISO(),
+        recordedAt: new Date().toISOString(),
+        measurements: normalizeCircumferenceLog(planState.bodyCircumferenceLog)
+      }
+      const latest = planState.circumferenceRecords[planState.circumferenceRecords.length - 1]
+      const sameAsLatest =
+        latest?.date === snapshot.date &&
+        JSON.stringify(normalizeCircumferenceLog(latest?.measurements || {})) === JSON.stringify(snapshot.measurements)
+      if (!sameAsLatest) {
+        planState.circumferenceRecords.push(snapshot)
+        planState.circumferenceRecords.sort((a, b) => {
+          const aTime = new Date(a?.recordedAt || a?.date || 0).getTime()
+          const bTime = new Date(b?.recordedAt || b?.date || 0).getTime()
+          return aTime - bTime
+        })
+      }
+    }
   }
   if (activeModal.value === 'fatEfficiency') {
     planState.fatLossEfficiency = normalizeNumber(modalForm.fatEfficiency)
@@ -2140,9 +2215,20 @@ function loadPlan() {
     if (data.performance) Object.assign(planState.performance, data.performance)
     if (data.bodyMetrics) Object.assign(planState.bodyMetrics, data.bodyMetrics)
     if (Array.isArray(data.weightRecords)) planState.weightRecords = data.weightRecords
+    if (Array.isArray(data.circumferenceRecords)) {
+      planState.circumferenceRecords = data.circumferenceRecords
+        .map((item) => ({
+          date: item?.date || '',
+          recordedAt: item?.recordedAt || item?.date || '',
+          measurements: normalizeCircumferenceLog(item?.measurements || item || {})
+        }))
+        .filter((item) => item.date)
+    }
     if (data.muscleAbility) Object.assign(planState.muscleAbility, data.muscleAbility)
     if (data.dailyLogs) Object.assign(planState.dailyLogs, data.dailyLogs)
-    if (data.bodyCircumferenceLog) Object.assign(planState.bodyCircumferenceLog, data.bodyCircumferenceLog)
+    if (data.bodyCircumferenceLog) {
+      Object.assign(planState.bodyCircumferenceLog, normalizeCircumferenceLog(data.bodyCircumferenceLog))
+    }
     if (data.fatLossEfficiency !== undefined) planState.fatLossEfficiency = data.fatLossEfficiency
     if (data.bodyProfile) Object.assign(planState.bodyProfile, data.bodyProfile)
     if (data.relatedFilters) planState.relatedFilters = { ...defaultRelatedFilters, ...data.relatedFilters }
@@ -2171,6 +2257,7 @@ function savePlan() {
     selectedChallenges: planState.selectedChallenges,
     bodyMetrics: planState.bodyMetrics,
     weightRecords: planState.weightRecords,
+    circumferenceRecords: planState.circumferenceRecords,
     muscleAbility: planState.muscleAbility,
     dailyLogs: planState.dailyLogs,
     bodyCircumferenceLog: planState.bodyCircumferenceLog,

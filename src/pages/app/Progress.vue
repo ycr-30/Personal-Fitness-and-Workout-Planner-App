@@ -485,19 +485,93 @@
 
       <article class="panel circumference-panel">
         <div class="panel-head">
-          <h2>Body Circumference</h2>
-          <span>Latest snapshot</span>
+          <h2>Body Circumference 身体围度</h2>
+          <div class="circumference-head-meta">
+            <span>{{ circumferenceSnapshotLabel }}</span>
+            <button class="btn small subtle" type="button" @click="goToPlan">Add Measurements</button>
+          </div>
         </div>
-        <div v-if="circumferenceEntries.length" class="circumference-bars">
-          <article v-for="item in circumferenceEntries" :key="item.id" class="circumference-row">
-            <span class="name">{{ item.label }}</span>
-            <div class="track">
-              <span :style="{ width: `${circumferencePercent(item.value)}%` }"></span>
+        <div v-if="circumferenceSummaryItems.length" class="circumference-summary">
+          <article v-for="item in circumferenceSummaryItems" :key="item.id" class="circumference-summary-row">
+            <div class="summary-copy">
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.deltaLabel }}</small>
             </div>
-            <strong>{{ item.value.toFixed(1) }} cm</strong>
+            <div class="summary-value">
+              <span>{{ item.valueLabel }}</span>
+              <em :class="item.deltaTone">{{ item.deltaText }}</em>
+            </div>
           </article>
         </div>
-        <p v-else class="empty">No circumference values yet. Add them in Plan -> Body Circumference.</p>
+
+        <div v-if="circumferenceHasData" class="circumference-trend">
+          <div class="inline-tabs compact scrollable">
+            <button
+              v-for="option in circumferenceMetricOptions"
+              :key="option.id"
+              type="button"
+              class="inline-tab"
+              :class="{ active: selectedCircumferenceMetric === option.id }"
+              @click="selectedCircumferenceMetric = option.id"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+
+          <div v-if="selectedCircumferenceSeries.length > 1" class="line-chart circumference-chart">
+            <div class="chart-with-axis">
+              <div class="y-axis-labels">
+                <span>{{ circumferenceYMaxLabel }}</span>
+                <span>{{ circumferenceYMidLabel }}</span>
+                <span>{{ circumferenceYMinLabel }}</span>
+              </div>
+              <div class="chart-core">
+                <svg viewBox="0 0 360 170" preserveAspectRatio="none">
+                  <g class="grid-lines">
+                    <line x1="18" y1="18" x2="342" y2="18"></line>
+                    <line x1="18" y1="85" x2="342" y2="85"></line>
+                    <line x1="18" y1="152" x2="342" y2="152"></line>
+                  </g>
+                  <path class="line-area circumference" :d="selectedCircumferenceChart.area"></path>
+                  <path class="line-main circumference" :d="selectedCircumferenceChart.path"></path>
+                  <circle
+                    v-for="point in selectedCircumferenceChart.points"
+                    :key="`circumference-${selectedCircumferenceMetric}-${point.x}-${point.y}`"
+                    class="line-point circumference"
+                    :cx="point.x"
+                    :cy="point.y"
+                    r="3"
+                  />
+                </svg>
+                <div class="x-axis-labels">
+                  <span>{{ circumferenceXStartLabel }}</span>
+                  <span>{{ circumferenceXMidLabel }}</span>
+                  <span>{{ circumferenceXEndLabel }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="axis-note">Y-axis: cm · X-axis: Date</div>
+          </div>
+
+          <div v-else-if="selectedCircumferenceSeries.length === 1" class="circumference-single-state">
+            <div class="single-point-card">
+              <strong>{{ selectedCircumferenceMetricOption.label }}</strong>
+              <span>{{ selectedCircumferenceSeries[0].value.toFixed(1) }} cm</span>
+              <small>{{ formatLongDate(selectedCircumferenceSeries[0].date) }}</small>
+            </div>
+            <p>Add one more snapshot to see a trend.</p>
+          </div>
+
+          <div v-else class="circumference-single-state">
+            <p>No snapshots recorded for {{ selectedCircumferenceMetricOption.label.toLowerCase() }} yet.</p>
+          </div>
+        </div>
+
+        <div v-else class="empty-state">
+          <p class="empty">No body measurements yet.</p>
+          <p class="empty-subtext">Add your first circumference snapshot in Plan -> Body Circumference.</p>
+          <button class="btn small" type="button" @click="goToPlan">Add Measurements</button>
+        </div>
       </article>
     </section>
 
@@ -606,16 +680,16 @@ const challengeMetaMap = {
 }
 
 const rangeOptions = [
-  { label: '7D', days: 7 },
-  { label: '30D', days: 30 },
-  { label: '90D', days: 90 }
+  { label: '7 Days', days: 7 },
+  { label: '30 Days', days: 30 },
+  { label: '90 Days', days: 90 }
 ]
 
 const bodyRangeOptions = [
-  { label: '7D', value: '7' },
-  { label: '30D', value: '30' },
-  { label: '90D', value: '90' },
-  { label: 'ALL', value: 'all' }
+  { label: '7 Days', value: '7' },
+  { label: '30 Days', value: '30' },
+  { label: '90 Days', value: '90' },
+  { label: 'All Time', value: 'all' }
 ]
 
 const volumeMetricOptions = [
@@ -632,14 +706,54 @@ const strengthMetricOptions = [
   { id: 'row', label: 'Row', pattern: /row/i }
 ]
 
-const circumferenceConfig = [
+const circumferenceMetricOptions = [
   { id: 'waist', label: 'Waist' },
   { id: 'chest', label: 'Chest' },
-  { id: 'hip', label: 'Hip' },
+  { id: 'hips', label: 'Hips' },
   { id: 'thigh', label: 'Thigh' },
-  { id: 'arm', label: 'Arm' },
   { id: 'calf', label: 'Calf' }
 ]
+
+const circumferenceSummaryConfig = [
+  { id: 'waist', label: 'Waist', accessor: (item) => toNumber(item?.waist) },
+  { id: 'chest', label: 'Chest', accessor: (item) => toNumber(item?.chest) },
+  { id: 'hips', label: 'Hips', accessor: (item) => toNumber(item?.hip) },
+  {
+    id: 'thigh',
+    label: 'Thigh',
+    accessor: (item) => averageMeasurements(item?.leftThigh, item?.rightThigh)
+  },
+  {
+    id: 'calf',
+    label: 'Calf',
+    accessor: (item) => averageMeasurements(item?.leftCalf, item?.rightCalf)
+  },
+  {
+    id: 'arm',
+    label: 'Arm',
+    accessor: (item) => averageMeasurements(item?.leftArm, item?.rightArm)
+  }
+]
+
+function normalizeCircumferenceLog(raw = {}) {
+  return {
+    chest: raw?.chest ?? '',
+    waist: raw?.waist ?? '',
+    hip: raw?.hip ?? '',
+    leftThigh: raw?.leftThigh ?? raw?.thigh ?? '',
+    rightThigh: raw?.rightThigh ?? raw?.thigh ?? '',
+    leftCalf: raw?.leftCalf ?? raw?.calf ?? '',
+    rightCalf: raw?.rightCalf ?? raw?.calf ?? '',
+    leftArm: raw?.leftArm ?? raw?.arm ?? '',
+    rightArm: raw?.rightArm ?? raw?.arm ?? ''
+  }
+}
+
+function averageMeasurements(...values) {
+  const numeric = values.map((value) => toNumber(value)).filter((value) => value != null)
+  if (!numeric.length) return null
+  return Number((numeric.reduce((sum, value) => sum + value, 0) / numeric.length).toFixed(1))
+}
 
 function createEmptyAnalyticsPlan() {
   return {
@@ -653,10 +767,14 @@ function createEmptyAnalyticsPlan() {
       chest: '',
       waist: '',
       hip: '',
-      thigh: '',
-      calf: '',
-      arm: ''
+      leftThigh: '',
+      rightThigh: '',
+      leftCalf: '',
+      rightCalf: '',
+      leftArm: '',
+      rightArm: ''
     },
+    circumferenceRecords: [],
     performance: { strength: {} }
   }
 }
@@ -673,6 +791,7 @@ const rangeDays = ref(30)
 const bodyRange = ref('90')
 const volumeMetric = ref('minutes')
 const selectedStrengthMetric = ref('bench')
+const selectedCircumferenceMetric = ref('waist')
 
 const aiInsight = ref('')
 const aiMeta = ref({ source: '', generatedAt: '' })
@@ -888,8 +1007,17 @@ function loadPlan() {
     next.dailyLogs = data?.dailyLogs || {}
     next.bodyCircumferenceLog = {
       ...next.bodyCircumferenceLog,
-      ...(data?.bodyCircumferenceLog || {})
+      ...normalizeCircumferenceLog(data?.bodyCircumferenceLog || {})
     }
+    next.circumferenceRecords = Array.isArray(data?.circumferenceRecords)
+      ? data.circumferenceRecords
+        .map((item) => ({
+          date: item?.date || '',
+          recordedAt: item?.recordedAt || item?.date || '',
+          measurements: normalizeCircumferenceLog(item?.measurements || item || {})
+        }))
+        .filter((item) => item.date)
+      : []
     next.performance = {
       ...next.performance,
       ...(data?.performance || {}),
@@ -2074,24 +2202,183 @@ function openStrengthSource(point) {
   })
 }
 
-const circumferenceEntries = computed(() =>
-  circumferenceConfig
+const normalizedCircumferenceRecords = computed(() => {
+  const rawRecords = Array.isArray(planState.value.circumferenceRecords) ? planState.value.circumferenceRecords : []
+  const mapped = rawRecords
     .map((item) => ({
-      id: item.id,
-      label: item.label,
-      value: toNumber(planState.value.bodyCircumferenceLog?.[item.id])
+      date: parseLocalDate(item?.recordedAt || item?.date),
+      iso: item?.date || '',
+      recordedAt: item?.recordedAt || item?.date || '',
+      measurements: normalizeCircumferenceLog(item?.measurements || item || {})
     }))
-    .filter((item) => item.value != null && item.value > 0)
+    .filter((item) => item.date && item.iso)
+    .sort((a, b) => a.date - b.date)
+
+  if (mapped.length) return mapped
+
+  const fallback = normalizeCircumferenceLog(planState.value.bodyCircumferenceLog || {})
+  const hasFallback = Object.values(fallback).some((value) => toNumber(value) != null)
+  if (!hasFallback) return []
+  return [{
+    date: new Date(today.value),
+    iso: todayIso.value,
+    measurements: fallback
+  }]
+})
+
+const latestCircumferenceSnapshot = computed(() =>
+  normalizedCircumferenceRecords.value.length
+    ? normalizedCircumferenceRecords.value[normalizedCircumferenceRecords.value.length - 1]
+    : null
 )
 
-const circumferenceMax = computed(() =>
-  Math.max(...circumferenceEntries.value.map((item) => item.value), 0)
+const previousCircumferenceSnapshot = computed(() =>
+  normalizedCircumferenceRecords.value.length > 1
+    ? normalizedCircumferenceRecords.value[normalizedCircumferenceRecords.value.length - 2]
+    : null
 )
 
-function circumferencePercent(value) {
-  if (!circumferenceMax.value) return 0
-  return Math.max(8, Math.round((value / circumferenceMax.value) * 100))
+function formatCircumferenceDelta(delta) {
+  if (delta == null) {
+    return { text: 'New', label: 'First snapshot', tone: 'neutral' }
+  }
+  if (Math.abs(delta) < 0.05) {
+    return { text: 'No change', label: 'No change vs previous', tone: 'neutral' }
+  }
+  const direction = delta > 0 ? 'up' : 'down'
+  const arrow = delta > 0 ? '↑' : '↓'
+  const magnitude = `${Math.abs(delta).toFixed(1)} cm`
+  const tone = direction === 'down' ? 'positive' : 'negative'
+  return {
+    text: `${arrow} ${magnitude} vs previous`,
+    label: `${arrow} ${magnitude} vs previous`,
+    tone
+  }
 }
+
+const circumferenceSummaryItems = computed(() =>
+  circumferenceSummaryConfig
+    .slice(0, 5)
+    .map((item) => {
+      const latestValue = item.accessor(latestCircumferenceSnapshot.value?.measurements || {})
+      if (latestValue == null) return null
+      const previousValue = item.accessor(previousCircumferenceSnapshot.value?.measurements || {})
+      const delta = previousValue == null ? null : Number((latestValue - previousValue).toFixed(1))
+      const formattedDelta = formatCircumferenceDelta(delta)
+      return {
+        id: item.id,
+        label: item.label,
+        value: latestValue,
+        valueLabel: `${latestValue.toFixed(1)} cm`,
+        deltaText: formattedDelta.text,
+        deltaLabel: formattedDelta.label,
+        deltaTone: formattedDelta.tone
+      }
+    })
+    .filter(Boolean)
+)
+
+const circumferenceHasData = computed(() => normalizedCircumferenceRecords.value.length > 0)
+
+const circumferenceSnapshotLabel = computed(() => {
+  if (!latestCircumferenceSnapshot.value?.date) return 'Latest snapshot'
+  return `Latest snapshot · ${formatShortDate(latestCircumferenceSnapshot.value.date)}`
+})
+
+const selectedCircumferenceMetricOption = computed(
+  () => circumferenceMetricOptions.find((item) => item.id === selectedCircumferenceMetric.value) || circumferenceMetricOptions[0]
+)
+
+const availableCircumferenceMetricId = computed(() => {
+  const latestMeasurements = latestCircumferenceSnapshot.value?.measurements
+  if (!latestMeasurements) return 'waist'
+  const available = circumferenceMetricOptions.find((item) =>
+    getCircumferenceMetricValue(item.id, latestMeasurements) != null
+  )
+  return available?.id || 'waist'
+})
+
+function getCircumferenceMetricValue(metricId, measurements) {
+  if (!measurements) return null
+  if (metricId === 'waist') return toNumber(measurements.waist)
+  if (metricId === 'chest') return toNumber(measurements.chest)
+  if (metricId === 'hips') return toNumber(measurements.hip)
+  if (metricId === 'thigh') return averageMeasurements(measurements.leftThigh, measurements.rightThigh)
+  if (metricId === 'calf') return averageMeasurements(measurements.leftCalf, measurements.rightCalf)
+  return null
+}
+
+const selectedCircumferenceSeries = computed(() =>
+  normalizedCircumferenceRecords.value
+    .map((item) => ({
+      date: item.date,
+      value: getCircumferenceMetricValue(selectedCircumferenceMetric.value, item.measurements)
+    }))
+    .filter((item) => item.date && item.value != null)
+    .slice(-10)
+)
+
+const selectedCircumferenceChart = computed(() =>
+  buildSeriesChart(selectedCircumferenceSeries.value, { includeArea: true })
+)
+
+const circumferenceAxisBounds = computed(() => {
+  const min = selectedCircumferenceChart.value.min
+  const max = selectedCircumferenceChart.value.max
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { min: null, mid: null, max: null }
+  }
+  if (Math.abs(max - min) < 0.001) {
+    const pad = Math.max(Math.abs(max) * 0.05, 0.5)
+    return {
+      min: Number((min - pad).toFixed(1)),
+      mid: Number(min.toFixed(1)),
+      max: Number((max + pad).toFixed(1))
+    }
+  }
+  return {
+    min: Number(min.toFixed(1)),
+    mid: Number((((min + max) / 2)).toFixed(1)),
+    max: Number(max.toFixed(1))
+  }
+})
+
+const circumferenceYMinLabel = computed(() =>
+  circumferenceAxisBounds.value.min == null ? '--' : `${circumferenceAxisBounds.value.min.toFixed(1)}`
+)
+const circumferenceYMidLabel = computed(() =>
+  circumferenceAxisBounds.value.mid == null ? '--' : `${circumferenceAxisBounds.value.mid.toFixed(1)}`
+)
+const circumferenceYMaxLabel = computed(() =>
+  circumferenceAxisBounds.value.max == null ? '--' : `${circumferenceAxisBounds.value.max.toFixed(1)}`
+)
+const circumferenceXStartLabel = computed(() =>
+  selectedCircumferenceSeries.value.length ? formatShortDate(selectedCircumferenceSeries.value[0].date) : '--'
+)
+const circumferenceXMidLabel = computed(() => {
+  if (!selectedCircumferenceSeries.value.length) return '--'
+  const midIndex = Math.floor((selectedCircumferenceSeries.value.length - 1) / 2)
+  return formatShortDate(selectedCircumferenceSeries.value[midIndex].date)
+})
+const circumferenceXEndLabel = computed(() =>
+  selectedCircumferenceSeries.value.length
+    ? formatShortDate(selectedCircumferenceSeries.value[selectedCircumferenceSeries.value.length - 1].date)
+    : '--'
+)
+
+watch(
+  availableCircumferenceMetricId,
+  (metricId) => {
+    if (!circumferenceMetricOptions.some((item) => item.id === selectedCircumferenceMetric.value)) {
+      selectedCircumferenceMetric.value = metricId
+      return
+    }
+    if (!selectedCircumferenceSeries.value.length) {
+      selectedCircumferenceMetric.value = metricId
+    }
+  },
+  { immediate: true }
+)
 
 function extractDistance(text) {
   const match = /(\d+(?:\.\d+)?)\s*km/i.exec(String(text || ''))
@@ -2217,10 +2504,9 @@ const analyticsSummary = computed(() => ({
       date: toIsoDate(item.date),
       value: Number(item.value.toFixed(1))
     })),
-    circumference: circumferenceEntries.value.map((item) => ({
-      id: item.id,
-      label: item.label,
-      value: Number(item.value.toFixed(1))
+    circumference: normalizedCircumferenceRecords.value.map((item) => ({
+      date: item.iso,
+      measurements: item.measurements
     }))
   },
   trainingVolume: weeklyTrend.value,
@@ -2272,10 +2558,7 @@ const aiMetaLabel = computed(() => {
       hour: '2-digit',
       minute: '2-digit'
     }).format(when)
-  let source = 'AI model'
-  if (aiMeta.value.source === 'heuristic') source = 'Rules fallback'
-  if (aiMeta.value.source === 'ai_fallback') source = 'AI fallback'
-  return `${source} · ${timestamp}`
+  return `Last updated · ${timestamp}`
 })
 
 async function fetchAiInsight() {
@@ -3185,9 +3468,8 @@ h1 {
   font-weight: 700;
 }
 
-.circumference-bars {
-  display: grid;
-  gap: 10px;
+.btn.subtle {
+  background: var(--surface-muted);
 }
 
 .source-panel {
@@ -3253,34 +3535,148 @@ h1 {
   line-height: 1.5;
 }
 
-.circumference-row {
+.circumference-panel {
   display: grid;
-  grid-template-columns: 70px 1fr auto;
-  align-items: center;
-  gap: 10px;
+  gap: 16px;
 }
 
-.circumference-row .name {
+.circumference-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.circumference-head-meta span {
   font-size: 12px;
   color: var(--text-muted);
 }
 
-.circumference-row .track {
-  height: 9px;
-  border-radius: 999px;
-  background: #e5e7eb;
+.circumference-summary {
+  border: 1px solid var(--border);
+  border-radius: 18px;
   overflow: hidden;
+  background: var(--surface-muted);
 }
 
-.circumference-row .track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #0ea5e9, #0284c7);
+.circumference-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
 }
 
-.circumference-row strong {
+.circumference-summary-row:last-child {
+  border-bottom: none;
+}
+
+.summary-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.summary-copy strong {
+  font-size: 15px;
+}
+
+.summary-copy small {
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+.summary-value {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.summary-value span {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.summary-value em {
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.summary-value em.positive {
+  color: #0f9f6e;
+}
+
+.summary-value em.negative {
+  color: #f04438;
+}
+
+.summary-value em.neutral {
+  color: var(--text-muted);
+}
+
+.circumference-trend {
+  display: grid;
+  gap: 14px;
+}
+
+.circumference-chart .line-area.circumference {
+  fill: rgba(239, 68, 68, 0.14);
+}
+
+.circumference-chart .line-main.circumference {
+  fill: none;
+  stroke: #ef4444;
+  stroke-width: 2.4;
+}
+
+.circumference-chart .line-point.circumference {
+  fill: #ffffff;
+  stroke: #ef4444;
+  stroke-width: 2;
+}
+
+.circumference-single-state {
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  background: var(--surface-muted);
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.single-point-card {
+  display: grid;
+  gap: 4px;
+}
+
+.single-point-card strong {
+  font-size: 15px;
+}
+
+.single-point-card span {
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.single-point-card small,
+.empty-subtext {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .circumference-summary-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .summary-value {
+    justify-content: flex-start;
+  }
 }
 
 .challenge-list {
