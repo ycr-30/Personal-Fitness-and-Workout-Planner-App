@@ -306,6 +306,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { getUserStorageKey } from '@/lib/userStorage'
+import { useUserSettings } from '@/composables/useUserSettings'
 
 const auth = useAuthStore()
 const logsKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
@@ -321,6 +322,7 @@ const showMoveModal = ref(false)
 const movingWorkoutId = ref(null)
 const moveDate = ref('')
 const DURATION_REQUIRED = 'Please enter training time.'
+const { settings: userSettings, loadSettings } = useUserSettings()
 
 const createForm = reactive({
   date: '',
@@ -329,7 +331,11 @@ const createForm = reactive({
 })
 
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const locationSuggestions = ["Gold's Gym", 'Home', 'Uni Gym']
+const baseLocationSuggestions = ["Gold's Gym", 'Home', 'Uni Gym']
+const locationSuggestions = computed(() => {
+  const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
+  return Array.from(new Set([defaultLocation, ...baseLocationSuggestions].filter(Boolean)))
+})
 const muscleGroupOptions = [
   { value: 'Chest', label: 'Chest' },
   { value: 'Back', label: 'Back' },
@@ -730,6 +736,26 @@ function getRpeLabel(rpe) {
   return 'Max effort'
 }
 
+function splitDurationMinutes(totalMinutes) {
+  const safeMinutes = Math.max(0, Number(totalMinutes) || 0)
+  return {
+    hours: Math.floor(safeMinutes / 60),
+    minutes: safeMinutes % 60
+  }
+}
+
+function getWorkoutDefaults() {
+  const { hours, minutes } = splitDurationMinutes(
+    userSettings.value?.workout_default_duration_min || 60
+  )
+  return {
+    location: (userSettings.value?.workout_default_location || '').trim(),
+    rpe: Number(userSettings.value?.workout_default_rpe) || 6,
+    durationHours: hours,
+    durationMinutes: minutes
+  }
+}
+
 function estimateRpeFromExercise(exercise) {
   const sets = Number(exercise.sets) || 0
   const reps = Number(exercise.reps) || 0
@@ -741,7 +767,8 @@ function estimateRpeFromExercise(exercise) {
 }
 
 function createScheduleExercise(overrides = {}) {
-  const defaultRpe = 6
+  const defaults = getWorkoutDefaults()
+  const defaultRpe = defaults.rpe
   const suggestion = getRpeSuggestion(defaultRpe)
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -751,8 +778,8 @@ function createScheduleExercise(overrides = {}) {
     reps: suggestion.reps,
     weight: suggestion.weight,
     rpe: defaultRpe,
-    durationHours: '',
-    durationMinutes: '',
+    durationHours: defaults.durationHours,
+    durationMinutes: defaults.durationMinutes,
     durationError: '',
     tags: [],
     _syncing: false,
@@ -816,8 +843,9 @@ function onScheduleExerciseGroupChange(exercise) {
 }
 
 function resetCreateForm(defaultDate = selectedDateIso.value) {
+  const defaults = getWorkoutDefaults()
   createForm.date = defaultDate
-  createForm.location = ''
+  createForm.location = defaults.location
   createForm.exercises = []
 }
 
@@ -896,7 +924,7 @@ function saveCreateSession() {
     location: createForm.location.trim(),
     exercises,
     prs: schedulePrCount.value,
-    status: 'pending'
+    status: userSettings.value?.workout_auto_mark_completed ? 'completed' : 'pending'
   })
 
   const next = [entry, ...logs.value].sort((a, b) => (a.date < b.date ? 1 : -1))
@@ -989,6 +1017,7 @@ watch(
 )
 
 onMounted(() => {
+  loadSettings()
   loadLogs()
   loadRestDays()
   if (typeof window !== 'undefined') {

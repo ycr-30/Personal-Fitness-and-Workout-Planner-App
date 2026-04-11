@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { getStableDeviceId, loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
 
 // 按你当前的目录结构引入页面
 import Landing from '@/pages/Landing.vue'
@@ -15,6 +16,65 @@ import MuscleMap from '@/pages/app/MuscleMap.vue'
 import Profile from '@/pages/app/Profile.vue'
 import Settings from '@/pages/app/Settings.vue'
 import Onboarding from '@/pages/onboarding/Survey.vue'
+
+const LAST_APP_ROUTE_KEY = 'pf_last_app_route'
+let activeCloudRouteIdentity = ''
+
+function readLastAppRoute() {
+  if (typeof window === 'undefined') return ''
+  const raw = window.localStorage.getItem(LAST_APP_ROUTE_KEY) || ''
+  if (!raw.startsWith('/')) return ''
+  if (raw === '/' || raw.startsWith('/login') || raw.startsWith('/register') || raw.startsWith('/onboarding')) {
+    return ''
+  }
+  return raw
+}
+
+function writeLastAppRoute(route) {
+  if (typeof window === 'undefined') return
+  if (!route?.fullPath || !route?.meta?.requiresAuth) return
+  window.localStorage.setItem(LAST_APP_ROUTE_KEY, route.fullPath)
+}
+
+async function hydrateLastAppRouteFromCloud(auth) {
+  if (typeof window === 'undefined' || !auth?.user) return ''
+  const identity = auth.user.id || auth.user.email || auth.user.account || auth.user.name || ''
+  if (!identity || activeCloudRouteIdentity === identity) {
+    return readLastAppRoute()
+  }
+
+  activeCloudRouteIdentity = identity
+  try {
+    const state = await loadCloudClientState({
+      scope: 'device',
+      deviceId: getStableDeviceId(),
+      keys: ['last_app_route']
+    })
+    const route = String(state?.last_app_route?.value || '').trim()
+    if (route.startsWith('/')) {
+      window.localStorage.setItem(LAST_APP_ROUTE_KEY, route)
+      return route
+    }
+  } catch (error) {
+    console.error('Failed to hydrate last route from cloud', error)
+  }
+
+  return readLastAppRoute()
+}
+
+function syncLastAppRouteToCloud(route) {
+  if (typeof window === 'undefined' || !route?.fullPath || !route?.meta?.requiresAuth) return
+  saveCloudClientState({
+    scope: 'device',
+    deviceId: getStableDeviceId(),
+    stateKey: 'last_app_route',
+    stateValue: {
+      value: route.fullPath
+    }
+  }).catch((error) => {
+    console.error('Failed to save last route to cloud', error)
+  })
+}
 
 const routes = [
   { path: '/', name: 'landing', component: Landing, meta: { hideShell: true } }, // 主页/介绍页
@@ -45,8 +105,12 @@ const router = createRouter({
 
 router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
+  const isOnboardingEdit = to.name === 'onboarding' && String(to.query.edit || '') === '1'
   if (!auth.user) auth.init()
   await auth.hydrateFromServer()
+  if (auth.isAuthed) {
+    await auth.hydrateOnboardingFromSupabase()
+  }
 
   if (to.meta.requiresAuth && !auth.isAuthed) {
     return next({ name: 'login', query: { redirect: to.fullPath } })
@@ -56,6 +120,14 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'onboarding' })
   }
 
+  if (to.name === 'landing' && auth.isAuthed) {
+    const lastAppRoute = await hydrateLastAppRouteFromCloud(auth)
+    if (lastAppRoute) {
+      return next(lastAppRoute)
+    }
+    return next({ name: 'dashboard' })
+  }
+
   if (to.meta.guestOnly && auth.isAuthed) {
     if (auth.user?.onboarding?.completed) {
       return next({ name: 'dashboard' })
@@ -63,11 +135,16 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'onboarding' })
   }
 
-  if (to.name === 'onboarding' && auth.user?.onboarding?.completed) {
+  if (to.name === 'onboarding' && auth.user?.onboarding?.completed && !isOnboardingEdit) {
     return next({ name: 'dashboard' })
   }
 
   return next()
+})
+
+router.afterEach((to) => {
+  writeLastAppRoute(to)
+  syncLastAppRouteToCloud(to)
 })
 
 export default router

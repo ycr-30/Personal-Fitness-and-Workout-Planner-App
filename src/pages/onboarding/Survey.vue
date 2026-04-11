@@ -2,11 +2,18 @@
   <main class="survey-page">
     <section class="survey-card">
       <header class="header">
-        <p class="eyebrow">Welcome to Fitness AI Planner</p>
-        <h1>Let’s tailor your training experience.</h1>
+        <p class="eyebrow">{{ isEditMode ? 'Training Profile' : 'Welcome to Fitness AI Planner' }}</p>
+        <h1>{{ isEditMode ? 'Update your onboarding answers.' : 'Let’s tailor your training experience.' }}</h1>
         <p class="lead">
-          Answer a handful of questions so we can recommend the right focus, cadence, and nutrition prompts.
+          {{
+            isEditMode
+              ? 'Refresh your starting preferences if your first survey answers were too rough or no longer fit your goals.'
+              : 'Answer a handful of questions so we can recommend the right focus, cadence, and nutrition prompts.'
+          }}
         </p>
+        <div v-if="isEditMode" class="header-actions">
+          <RouterLink class="back-link" :to="returnTarget">Back</RouterLink>
+        </div>
       </header>
 
       <form class="form" @submit.prevent="submit">
@@ -67,7 +74,7 @@
         </fieldset>
 
         <button class="submit" type="submit" :disabled="!isComplete">
-          Complete onboarding
+          {{ isEditMode ? 'Save onboarding answers' : 'Complete onboarding' }}
         </button>
       </form>
     </section>
@@ -75,11 +82,12 @@
 </template>
 
 <script setup>
-import { computed, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, reactive, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 
 // 体验调查的选项（采用专业语气引导用户完成）
@@ -162,16 +170,38 @@ const form = reactive({
   nutrition: ''
 })
 
+const isEditMode = computed(() => String(route.query.edit || '') === '1')
+const returnTarget = computed(() =>
+  typeof route.query.returnTo === 'string' && route.query.returnTo ? route.query.returnTo : '/profile'
+)
+const existingAnswers = computed(() => auth.user?.onboarding?.answers || null)
+
+watch(
+  existingAnswers,
+  (answers) => {
+    if (!answers) return
+    form.experience = answers.experience || ''
+    form.goal = answers.goal || ''
+    form.frequency = answers.frequency || ''
+    form.nutrition = answers.nutrition || ''
+  },
+  { immediate: true }
+)
+
 const isComplete = computed(
   () => form.experience && form.goal && form.frequency && form.nutrition
 )
 
 async function submit() {
   if (!isComplete.value) return
-  auth.completeOnboarding({
+  await auth.completeOnboarding({
     ...form,
-    completedAt: new Date().toISOString()
+    completedAt: existingAnswers.value?.completedAt || new Date().toISOString()
   })
+  if (isEditMode.value) {
+    router.push(returnTarget.value)
+    return
+  }
   router.push({ name: 'dashboard' })
 }
 </script>
@@ -204,6 +234,11 @@ async function submit() {
   gap: 12px;
 }
 
+.header-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .eyebrow {
   font-size: 14px;
   letter-spacing: 0.18em;
@@ -223,6 +258,20 @@ async function submit() {
   font-size: 18px;
   line-height: 1.6;
   color: #6e6e73;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(210, 210, 215, 0.8);
+  background: rgba(255, 255, 255, 0.65);
+  color: #1d1d1f;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
 }
 
 .form {

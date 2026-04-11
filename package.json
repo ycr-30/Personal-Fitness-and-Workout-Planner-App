@@ -10,7 +10,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "import:free-exercise-db": "node scripts/import-free-exercise-db.mjs"
+    "import:free-exercise-db": "node scripts/import-free-exercise-db.mjs",
+    "import:nutrition-foods": "node scripts/import-nutrition-foods.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.93.2",

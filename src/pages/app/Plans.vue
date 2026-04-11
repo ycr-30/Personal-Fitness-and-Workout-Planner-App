@@ -907,6 +907,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { syncNutritionGoalsWithPlan } from '@/lib/nutritionGoalSync'
 import { getUserStorageKey } from '@/lib/userStorage'
 
 const auth = useAuthStore()
@@ -1324,6 +1325,7 @@ const activityCalories = ref(0)
 const activityMinutes = ref(0)
 const currentTime = ref('')
 let timeTicker = null
+let nutritionSyncTimer = null
 
 function formatClock(date) {
   const hours = String(date.getHours()).padStart(2, '0')
@@ -2267,6 +2269,23 @@ function savePlan() {
   }
   window.localStorage.setItem(storageKey.value, JSON.stringify(payload))
   window.dispatchEvent(new Event('pf_plan_updated'))
+  scheduleNutritionGoalSync(payload)
+}
+
+function scheduleNutritionGoalSync(planPayload) {
+  if (nutritionSyncTimer) {
+    clearTimeout(nutritionSyncTimer)
+  }
+  nutritionSyncTimer = setTimeout(async () => {
+    try {
+      await syncNutritionGoalsWithPlan({
+        authUser: auth.user,
+        planState: planPayload
+      })
+    } catch (error) {
+      console.error('Failed to sync nutrition goals from plan', error)
+    }
+  }, 600)
 }
 
 function loadWorkouts() {
@@ -2714,6 +2733,10 @@ onBeforeUnmount(() => {
   if (timeTicker) {
     clearInterval(timeTicker)
     timeTicker = null
+  }
+  if (nutritionSyncTimer) {
+    clearTimeout(nutritionSyncTimer)
+    nutritionSyncTimer = null
   }
 })
 

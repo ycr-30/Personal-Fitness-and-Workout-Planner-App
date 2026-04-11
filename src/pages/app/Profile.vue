@@ -2,9 +2,10 @@
   <section class="profile-page">
     <header class="profile-header">
       <div>
-        <h1>General Profile</h1>
-        <p>Update your personal information and contact details.</p>
+        <h1>Personal Profile</h1>
+        <p>Update the identity and body metrics that shape your plan, analytics, and nutrition guidance.</p>
         <p v-if="saved" class="save-toast">Profile updated successfully.</p>
+        <p v-else-if="profileError" class="save-toast error">{{ profileError }}</p>
       </div>
     </header>
 
@@ -14,9 +15,18 @@
         <div class="avatar" :style="avatarStyle">
           <span v-if="!avatarStyle.backgroundImage">{{ initials }}</span>
         </div>
-        <div>
+        <div class="hero-copy">
           <h2>{{ fullName }}</h2>
-          <p>{{ form.email || 'alex.morgan@example.com' }}</p>
+          <p>Profile details used across coaching, analytics, and planning.</p>
+          <div class="hero-account">
+            <span class="meta-label">Account email</span>
+            <div class="hero-account-row">
+              <strong>{{ accountEmailDisplay }}</strong>
+              <RouterLink class="manage-link" to="/settings">
+                Manage in Settings
+              </RouterLink>
+            </div>
+          </div>
         </div>
         <label class="edit-avatar">
           <input type="file" accept="image/*" @change="onAvatarChange" />
@@ -29,8 +39,8 @@
       <section class="card">
         <header class="card-title">
           <div>
-            <h3>Personal Information</h3>
-            <p>Manage your contact details.</p>
+            <h3>Basic Information</h3>
+            <p>Name shown across your dashboard, plan, and workout history.</p>
           </div>
           <div class="card-actions">
             <template v-if="isEditingPersonal">
@@ -49,15 +59,11 @@
             <label>Last Name</label>
             <input v-model.trim="form.lastName" type="text" placeholder="Morgan" :disabled="!isEditingPersonal" />
           </div>
-          <div class="field">
-            <label>Email Address</label>
-            <input v-model="form.email" type="email" disabled />
-          </div>
-          <div class="field">
-            <label>Phone Number</label>
-            <input v-model.trim="form.phone" type="tel" placeholder="+1 (555) 000-0000" :disabled="!isEditingPersonal" />
-          </div>
         </div>
+        <p class="section-note">
+          Account email, sign-in method, password, and delete account controls are managed in
+          <RouterLink to="/settings">Settings</RouterLink>.
+        </p>
       </section>
 
       <section class="card">
@@ -115,14 +121,22 @@
         </div>
       </section>
 
-      <section v-if="onboardingSummary" class="card">
+      <section class="card">
         <header class="card-title">
           <div>
             <h3>Onboarding Preferences</h3>
-            <p>A quick snapshot from your survey answers.</p>
+            <p>Review or revise the survey answers that shaped your original starting point.</p>
+          </div>
+          <div class="card-actions">
+            <RouterLink
+              class="btn ghost link-button"
+              :to="{ name: 'onboarding', query: { edit: '1', returnTo: '/profile' } }"
+            >
+              {{ onboardingSummary ? 'Edit Onboarding Answers' : 'Complete Onboarding Answers' }}
+            </RouterLink>
           </div>
         </header>
-        <div class="summary-grid">
+        <div v-if="onboardingSummary" class="summary-grid">
           <div class="summary-item">
             <span>Training background</span>
             <strong>{{ onboardingCopy.experience[onboardingSummary.experience] }}</strong>
@@ -140,16 +154,31 @@
             <strong>{{ onboardingCopy.nutrition[onboardingSummary.nutrition] }}</strong>
           </div>
         </div>
+        <p v-else class="section-note">
+          No onboarding answers are saved yet. Add them if you want to keep a clear record of your original goal,
+          training background, and weekly rhythm.
+        </p>
+        <p class="section-note compact">
+          Once you build enough real workout history, plan tuning should rely more on your body metrics and logged
+          training data than on this survey snapshot.
+        </p>
       </section>
     </form>
   </section>
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { useUserProfile } from '@/composables/useUserProfile'
 
 const auth = useAuthStore()
+const {
+  profile,
+  error: profileError,
+  loadProfile,
+  saveProfile
+} = useUserProfile()
 const saved = ref(false)
 const isEditingPersonal = ref(false)
 const isEditingBody = ref(false)
@@ -159,8 +188,6 @@ const bodyBackup = ref(null)
 const form = reactive({
   firstName: '',
   lastName: '',
-  email: '',
-  phone: '',
   sex: 'female',
   birthday: '',
   height: '',
@@ -168,32 +195,64 @@ const form = reactive({
   avatar: ''
 })
 
-const setFormFromUser = (user) => {
-  const name = user?.name || ''
+function normalizeBirthdayValue(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toISOString().split('T')[0]
+}
+
+function normalizeNumberValue(value) {
+  if (value === null || value === undefined || value === '') return ''
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : ''
+}
+
+const setFormFromSource = (source = {}) => {
+  const name = source?.displayName || source?.name || ''
   const parts = name.trim().split(' ')
-  form.firstName = parts[0] || ''
-  form.lastName = parts.slice(1).join(' ')
-  form.email = user?.email || ''
-  form.phone = user?.phone || ''
-  form.sex = user?.sex || 'female'
-  form.birthday = user?.birthday || ''
-  form.height = user?.height || ''
-  form.weight = user?.weight || ''
-  form.avatar = user?.avatar || ''
+  form.firstName = source?.firstName ?? parts[0] ?? ''
+  form.lastName = source?.lastName ?? parts.slice(1).join(' ')
+  form.sex = source?.sex || 'female'
+  form.birthday = normalizeBirthdayValue(source?.birthday)
+  form.height = normalizeNumberValue(source?.height)
+  form.weight = normalizeNumberValue(source?.weight)
+  form.avatar = source?.avatar || ''
 }
 
 watch(
   () => auth.user,
   (user) => {
-    if (user) setFormFromUser(user)
+    if (!user || isEditingPersonal.value || isEditingBody.value) return
+    setFormFromSource({
+      name: user.name,
+      sex: user.sex,
+      birthday: user.birthday,
+      height: user.heightCm || user.height || '',
+      weight: user.weightKg || user.weight || '',
+      avatar: user.avatar
+    })
   },
   { immediate: true }
 )
 
+watch(
+  profile,
+  (value) => {
+    if (!value || isEditingPersonal.value || isEditingBody.value) return
+    setFormFromSource(value)
+  },
+  { immediate: true, deep: true }
+)
+
 const fullName = computed(() => {
   const name = `${form.firstName} ${form.lastName}`.trim()
-  return name || 'Alex Morgan'
+  return name || auth.user?.name || 'Athlete'
 })
+
+const accountEmailDisplay = computed(() => auth.user?.email || 'No linked account email')
 
 const initials = computed(() => {
   const parts = fullName.value.split(' ')
@@ -238,6 +297,14 @@ function onAvatarChange(event) {
   if (!file) return
   if (!file.type.startsWith('image/')) return
   if (file.size > 2 * 1024 * 1024) return
+  if (!isEditingPersonal.value) {
+    personalBackup.value = {
+      firstName: form.firstName,
+      lastName: form.lastName,
+      avatar: form.avatar
+    }
+    isEditingPersonal.value = true
+  }
   const reader = new FileReader()
   reader.onload = () => {
     form.avatar = reader.result
@@ -245,15 +312,11 @@ function onAvatarChange(event) {
   reader.readAsDataURL(file)
 }
 
-function resetForm() {
-  if (auth.user) setFormFromUser(auth.user)
-}
-
 function startPersonalEdit() {
   personalBackup.value = {
     firstName: form.firstName,
     lastName: form.lastName,
-    phone: form.phone
+    avatar: form.avatar
   }
   isEditingPersonal.value = true
 }
@@ -262,21 +325,30 @@ function cancelPersonalEdit() {
   if (personalBackup.value) {
     form.firstName = personalBackup.value.firstName
     form.lastName = personalBackup.value.lastName
-    form.phone = personalBackup.value.phone
+    form.avatar = personalBackup.value.avatar
   }
   isEditingPersonal.value = false
 }
 
-function savePersonal() {
-  auth.updateProfile({
-    name: fullName.value,
-    phone: form.phone
-  })
-  isEditingPersonal.value = false
-  saved.value = true
-  setTimeout(() => {
-    saved.value = false
-  }, 2200)
+async function savePersonal() {
+  try {
+    await saveProfile({
+      ...profile.value,
+      firstName: form.firstName,
+      lastName: form.lastName,
+      displayName: fullName.value,
+      avatar: form.avatar,
+      sex: form.sex,
+      birthday: form.birthday,
+      height: form.height,
+      weight: form.weight
+    })
+    isEditingPersonal.value = false
+    saved.value = true
+    setTimeout(() => {
+      saved.value = false
+    }, 2200)
+  } catch {}
 }
 
 function startBodyEdit() {
@@ -299,18 +371,25 @@ function cancelBodyEdit() {
   isEditingBody.value = false
 }
 
-function saveBody() {
-  auth.updateProfile({
-    sex: form.sex,
-    birthday: form.birthday,
-    height: form.height,
-    weight: form.weight
-  })
-  isEditingBody.value = false
-  saved.value = true
-  setTimeout(() => {
-    saved.value = false
-  }, 2200)
+async function saveBody() {
+  try {
+    await saveProfile({
+      ...profile.value,
+      firstName: form.firstName,
+      lastName: form.lastName,
+      displayName: fullName.value,
+      avatar: form.avatar,
+      sex: form.sex,
+      birthday: form.birthday,
+      height: form.height,
+      weight: form.weight
+    })
+    isEditingBody.value = false
+    saved.value = true
+    setTimeout(() => {
+      saved.value = false
+    }, 2200)
+  } catch {}
 }
 
 function setSex(value) {
@@ -342,6 +421,10 @@ const onboardingCopy = {
     'calorie-surplus': 'Lean surplus'
   }
 }
+
+onMounted(() => {
+  loadProfile({ force: true })
+})
 </script>
 
 <style scoped>
@@ -376,6 +459,10 @@ const onboardingCopy = {
   color: #15803d;
 }
 
+.save-toast.error {
+  color: #dc2626;
+}
+
 .header-actions {
   display: flex;
   gap: 12px;
@@ -399,6 +486,10 @@ const onboardingCopy = {
 .btn.ghost {
   background: var(--surface);
   color: var(--text-primary);
+}
+
+.link-button {
+  text-decoration: none;
 }
 
 .profile-hero {
@@ -436,6 +527,11 @@ const onboardingCopy = {
   background-position: center;
 }
 
+.hero-copy {
+  display: grid;
+  gap: 10px;
+}
+
 .hero-body h2 {
   margin: 0 0 4px;
   font-size: 20px;
@@ -444,6 +540,38 @@ const onboardingCopy = {
 .hero-body p {
   margin: 0;
   color: var(--text-muted);
+}
+
+.hero-account {
+  display: grid;
+  gap: 6px;
+}
+
+.meta-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.hero-account-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hero-account-row strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.manage-link {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .edit-avatar {
@@ -507,6 +635,23 @@ const onboardingCopy = {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
+}
+
+.section-note {
+  margin: 16px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.section-note.compact {
+  margin-top: 10px;
+}
+
+.section-note a {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .field {

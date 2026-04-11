@@ -1,11 +1,13 @@
 // src/stores/auth.js
 import { defineStore } from 'pinia'
+import { loadUserOnboardingAnswers, normalizeOnboardingAnswers, saveUserOnboardingAnswers } from '@/lib/userOnboardingCloud'
 
 const USERS_KEY = 'pf_users' // 所有注册用户（原型阶段使用浏览器本地存储）
 const CURRENT_KEY = 'pf_current_user' // 当前登录用户的账号键
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/ // 邮箱格式校验
 const USERNAME_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/ // 用户名规则：≥6 且含大小写字母与数字
 const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000' // 鉴权服务地址
+let activeCloudOnboardingIdentity = ''
 
 function readUsers() {
   const raw = localStorage.getItem(USERS_KEY)
@@ -14,6 +16,20 @@ function readUsers() {
 
 function writeUsers(obj) {
   localStorage.setItem(USERS_KEY, JSON.stringify(obj))
+}
+
+function cacheUserRecord(record) {
+  if (!record) return
+  const users = readUsers()
+  const accountKey =
+    record.accountKey ||
+    record.account?.toLowerCase?.() ||
+    record.email?.toLowerCase?.() ||
+    record.id
+  if (!accountKey) return
+  const { password, ...safeRecord } = record
+  users[accountKey] = safeRecord
+  writeUsers(users)
 }
 
 function pickUserSnapshot(record) {
@@ -88,28 +104,37 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async hydrateFromServer() {
-      if (this.user) return
       try {
         const res = await fetch(`${AUTH_SERVER_ORIGIN}/me`, {
           credentials: 'include'
         })
-        if (!res.ok) return
+        if (!res.ok) {
+          if (this.user?.provider) {
+            this.user = null
+          }
+          return
+        }
         const data = await res.json()
         if (data?.user) {
-          this.user = pickUserSnapshot({
+          const nextUser = pickUserSnapshot({
             ...data.user,
             onboarding: {
               completed: !!data.user.onboardingCompleted,
-              answers: null
+              answers:
+                data.user.onboardingAnswers ??
+                data.user.onboarding?.answers ??
+                null
             }
           })
+          cacheUserRecord(nextUser)
+          this.user = nextUser
         }
       } catch (err) {
         console.error('hydrateFromServer failed', err)
       }
     },
 
-    async register(payload) {
+    async beginLocalRegistration(payload) {
       const {
         account,
         name,
@@ -155,56 +180,86 @@ export const useAuthStore = defineStore('auth', {
       }
 
       this.loading = true
-      await new Promise((resolve) => setTimeout(resolve, 400)) // 模拟网络延迟
-
-      const users = readUsers()
-      const accountKey = trimmedAccount.toLowerCase()
-      if (users[accountKey]) {
+      try {
+        const response = await fetch(`${AUTH_SERVER_ORIGIN}/auth/local/send-verification`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            account: trimmedAccount,
+            email: trimmedEmail || (isEmail ? trimmedAccount : ''),
+            name,
+            password,
+            sex: normalizedSex,
+            birthday,
+            height: numericHeight,
+            weight: numericWeight,
+            avatarData: avatarData || ''
+          })
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          this.error = data?.error || 'Failed to create verification state.'
+          return null
+        }
+        return {
+          ok: true,
+          deliveryTarget: data?.deliveryTarget || trimmedEmail || trimmedAccount,
+          expiresIn: Number(data?.expiresIn || 60),
+          debugCode: data?.debugCode || '',
+          notice: data?.notice || ''
+        }
+      } catch (err) {
+        console.error('beginLocalRegistration failed', err)
+        this.error = 'Failed to create verification state.'
+        return null
+      } finally {
         this.loading = false
-        this.error = 'Account already registered.'
+      }
+    },
+
+    async confirmLocalRegistration({ account, code }) {
+      const trimmedAccount = account?.trim?.() || ''
+      const trimmedCode = code?.trim?.() || ''
+      this.error = null
+      if (!trimmedAccount || !trimmedCode) {
+        this.error = 'Account and verification code are required.'
         return false
       }
-      const emailToCheck = trimmedEmail || (isEmail ? trimmedAccount : '')
-      if (emailToCheck) {
-        for (const record of Object.values(users)) {
-          if (record.email && record.email.toLowerCase() === emailToCheck.toLowerCase()) {
-            this.loading = false
-            this.error = 'Email already registered.'
-            return false
-          }
+
+      this.loading = true
+      try {
+        const response = await fetch(`${AUTH_SERVER_ORIGIN}/auth/local/confirm-registration`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            account: trimmedAccount,
+            code: trimmedCode
+          })
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          this.error = data?.error || 'Failed to complete registration.'
+          return false
         }
+        if (data?.user) {
+          const nextUser = pickUserSnapshot(data.user)
+          cacheUserRecord(nextUser)
+          localStorage.setItem(
+            CURRENT_KEY,
+            nextUser.accountKey || nextUser.account?.toLowerCase?.() || nextUser.email?.toLowerCase?.() || trimmedAccount.toLowerCase()
+          )
+          this.user = nextUser
+        }
+        return true
+      } catch (err) {
+        console.error('confirmLocalRegistration failed', err)
+        this.error = 'Failed to complete registration.'
+        return false
+      } finally {
+        this.loading = false
       }
-
-      const storedEmail = trimmedEmail || (isEmail ? trimmedAccount : '')
-
-      const bodyFat = calculateBodyFat({
-        heightCm: numericHeight,
-        weightKg: numericWeight,
-        birthday,
-        sex: normalizedSex
-      })
-
-      const userRecord = {
-        account: trimmedAccount,
-        accountKey,
-        email: storedEmail,
-        name,
-        password,
-        sex: normalizedSex,
-        birthday,
-        height: numericHeight,
-        weight: numericWeight,
-        bodyFat,
-        avatar: avatarData || '',
-        onboarding: { completed: false, answers: null }
-      }
-
-      users[accountKey] = userRecord
-      writeUsers(users)
-      localStorage.setItem(CURRENT_KEY, accountKey)
-      this.user = pickUserSnapshot(userRecord)
-      this.loading = false
-      return true
     },
 
     async login({ identifier, password, remember = true }) {
@@ -222,44 +277,41 @@ export const useAuthStore = defineStore('auth', {
         this.error = 'Password is required.'
         return false
       }
-      if (
-        !EMAIL_PATTERN.test(trimmedIdentifier) &&
-        !USERNAME_PATTERN.test(trimmedIdentifier)
-      ) {
-        this.error = 'Please enter a valid account or email.'
-        return false
-      }
       this.loading = true
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      const users = readUsers()
-      const lookupKey = trimmedIdentifier.toLowerCase()
-      let record = users[lookupKey]
-      let storedKey = lookupKey
-      if (!record) {
-        for (const [key, entry] of Object.entries(users)) {
-          const candidateAccount = entry.account?.toLowerCase?.()
-          const candidateEmail = entry.email?.toLowerCase?.()
-          if (candidateAccount === lookupKey || candidateEmail === lookupKey || key === trimmedIdentifier) {
-            record = entry
-            storedKey = key
-            break
-          }
+      try {
+        const response = await fetch(`${AUTH_SERVER_ORIGIN}/auth/local/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            identifier: trimmedIdentifier,
+            password
+          })
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || !data?.user) {
+          this.error = data?.error || 'Incorrect account or password.'
+          return false
         }
-      }
-      if (!record || record.password !== password) {
-        this.loading = false
-        this.error = 'Incorrect account or password.'
+        const nextUser = pickUserSnapshot(data.user)
+        cacheUserRecord(nextUser)
+        if (remember) {
+          localStorage.setItem(
+            CURRENT_KEY,
+            nextUser.accountKey || nextUser.account?.toLowerCase?.() || nextUser.email?.toLowerCase?.() || trimmedIdentifier.toLowerCase()
+          )
+        } else {
+          localStorage.removeItem(CURRENT_KEY)
+        }
+        this.user = nextUser
+        return true
+      } catch (err) {
+        console.error('local login failed', err)
+        this.error = 'Failed to log in.'
         return false
+      } finally {
+        this.loading = false
       }
-      if (remember) {
-        localStorage.setItem(CURRENT_KEY, record.accountKey || storedKey)
-      } else {
-        localStorage.removeItem(CURRENT_KEY)
-      }
-      this.user = pickUserSnapshot(record)
-      this.loading = false
-      return true
     },
 
     async loginWithEmailOtp({ email }) {
@@ -329,7 +381,11 @@ export const useAuthStore = defineStore('auth', {
         writeUsers(users)
       }
       localStorage.setItem(CURRENT_KEY, accountKey)
-      this.user = pickUserSnapshot(users[accountKey])
+      const nextUser = pickUserSnapshot(users[accountKey])
+      cacheUserRecord(nextUser)
+      this.user = nextUser
+      activeCloudOnboardingIdentity = ''
+      await this.hydrateOnboardingFromSupabase({ force: true })
       this.error = null
       return true
     },
@@ -343,9 +399,70 @@ export const useAuthStore = defineStore('auth', {
       } catch (err) {
         console.error('logout request failed', err)
       }
+      activeCloudOnboardingIdentity = ''
       localStorage.removeItem(CURRENT_KEY)
       this.user = null
       this.error = null
+    },
+
+    applyOnboardingAnswers(answers) {
+      if (!this.user) return null
+
+      const normalized = normalizeOnboardingAnswers(answers)
+      if (!normalized) return null
+
+      const users = readUsers()
+      const currentKey = localStorage.getItem(CURRENT_KEY)
+      let key = null
+
+      if (this.user.email && users[this.user.email]) {
+        key = this.user.email
+      } else if (currentKey && users[currentKey]) {
+        key = currentKey
+      } else if (this.user.account && users[this.user.account.toLowerCase()]) {
+        key = this.user.account.toLowerCase()
+      }
+
+      const current = key ? users[key] : null
+      const merged = {
+        ...(current || this.user),
+        onboardingCompleted: true,
+        onboardingAnswers: normalized,
+        onboarding: {
+          completed: true,
+          answers: normalized
+        }
+      }
+
+      if (key) {
+        users[key] = merged
+        writeUsers(users)
+      }
+
+      this.user = pickUserSnapshot(merged)
+      activeCloudOnboardingIdentity = this.user?.id || this.user?.email || this.user?.account || ''
+      return normalized
+    },
+
+    async hydrateOnboardingFromSupabase({ force = false } = {}) {
+      if (!this.user) return null
+
+      const identity = this.user.id || this.user.email || this.user.account || ''
+      if (!force && activeCloudOnboardingIdentity === identity) {
+        return this.user.onboarding || null
+      }
+
+      activeCloudOnboardingIdentity = identity
+
+      try {
+        const answers = await loadUserOnboardingAnswers()
+        if (!answers) return this.user.onboarding || null
+        this.applyOnboardingAnswers(answers)
+        return this.user.onboarding || null
+      } catch (err) {
+        console.error('hydrateOnboardingFromSupabase failed', err)
+        return this.user.onboarding || null
+      }
     },
 
     updateProfile(updates) {
@@ -394,6 +511,8 @@ export const useAuthStore = defineStore('auth', {
 
     async completeOnboarding(answers) {
       if (!this.user) return
+      const normalizedAnswers = normalizeOnboardingAnswers(answers)
+      if (!normalizedAnswers) return
 
       // 如果有后端会话（通过 hydrateFromServer 获得 id/provider 等），优先写后端
       if (this.user.id) {
@@ -404,7 +523,7 @@ export const useAuthStore = defineStore('auth', {
             credentials: 'include',
             body: JSON.stringify({
               onboardingCompleted: true,
-              onboardingAnswers: answers
+              onboardingAnswers: normalizedAnswers
             })
           })
           if (res.ok) {
@@ -412,41 +531,35 @@ export const useAuthStore = defineStore('auth', {
             if (data?.user) {
               this.user = pickUserSnapshot({
                 ...data.user,
-                onboarding: { completed: true, answers }
+                onboarding: { completed: true, answers: normalizedAnswers }
               })
             } else {
               this.user = {
                 ...this.user,
-                onboarding: { completed: true, answers }
+                onboarding: { completed: true, answers: normalizedAnswers }
               }
             }
-            return
+          } else {
+            throw new Error('Profile update request failed.')
           }
         } catch (err) {
           console.error('completeOnboarding server failed', err)
         }
       }
 
-      // 本地存储回退（原有前端-only 模式）
-      const users = readUsers()
-      const current = users[this.user.email]
-      if (!current) {
-        this.user = {
-          ...this.user,
-          onboarding: { completed: true, answers }
+      this.applyOnboardingAnswers(normalizedAnswers)
+
+      try {
+        const cloudAnswers = await saveUserOnboardingAnswers(normalizedAnswers)
+        if (cloudAnswers) {
+          this.applyOnboardingAnswers(cloudAnswers)
+          return
         }
-        return
+      } catch (err) {
+        console.error('completeOnboarding supabase sync failed', err)
       }
-      const merged = {
-        ...current,
-        onboarding: {
-          completed: true,
-          answers
-        }
-      }
-      users[this.user.email] = merged
-      writeUsers(users)
-      this.user = pickUserSnapshot(merged)
+
+      this.applyOnboardingAnswers(normalizedAnswers)
     }
   }
 })

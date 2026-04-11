@@ -73,135 +73,13 @@
     </nav>
 
     <div class="sidebar-bottom">
-      <div class="goal-card">
-        <span class="goal-title">Weekly Goal</span>
-        <div class="goal-progress">
-          <div class="goal-bar">
-            <span :style="{ width: `${goalProgress}%` }"></span>
-          </div>
-          <span class="goal-count">{{ weeklyCompleted }}/{{ weeklyPending }}</span>
-        </div>
-        <p>{{ goalMessage }}</p>
-      </div>
       <UserMenu />
     </div>
   </aside>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import UserMenu from '@/components/UserMenu.vue'
-import { useAuthStore } from '@/stores/auth'
-import { getUserStorageKey } from '@/lib/userStorage'
-
-const auth = useAuthStore()
-const storageKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
-const logs = ref([])
-
-function parseLocalDate(value) {
-  if (!value) return null
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value))
-  if (match) {
-    const [, year, month, day] = match
-    return new Date(Number(year), Number(month) - 1, Number(day))
-  }
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-function startOfWeek(date) {
-  const next = new Date(date)
-  next.setHours(0, 0, 0, 0)
-  next.setDate(next.getDate() - next.getDay())
-  return next
-}
-
-function endOfWeek(date) {
-  const next = startOfWeek(date)
-  next.setDate(next.getDate() + 6)
-  next.setHours(23, 59, 59, 999)
-  return next
-}
-
-function loadLogs() {
-  if (typeof window === 'undefined') return
-  const raw = localStorage.getItem(storageKey.value)
-  if (!raw) {
-    logs.value = []
-    return
-  }
-  try {
-    const data = JSON.parse(raw)
-    logs.value = Array.isArray(data) ? data : []
-  } catch (err) {
-    console.error('Failed to parse logs', err)
-    logs.value = []
-  }
-}
-
-const currentWeekLogs = computed(() => {
-  const today = new Date()
-  const weekStart = startOfWeek(today)
-  const weekEnd = endOfWeek(today)
-  return logs.value.filter((item) => {
-    const date = parseLocalDate(item?.date)
-    return date && date >= weekStart && date <= weekEnd
-  })
-})
-
-const weeklyCompleted = computed(() => {
-  return currentWeekLogs.value.filter((item) => item.status === 'completed').length
-})
-
-const weeklyPending = computed(() => {
-  return currentWeekLogs.value.filter((item) => item.status !== 'completed').length
-})
-
-const weeklyTarget = computed(() => {
-  return weeklyCompleted.value + weeklyPending.value
-})
-
-const goalProgress = computed(() => {
-  if (!weeklyTarget.value) return 0
-  const progress = (weeklyCompleted.value / weeklyTarget.value) * 100
-  return Math.min(100, Math.max(0, Math.round(progress)))
-})
-
-const goalMessage = computed(() => {
-  if (weeklyTarget.value === 0) return 'No workouts scheduled this week.'
-  if (weeklyPending.value > 0 && weeklyCompleted.value === 0) return 'Start this week’s scheduled sessions.'
-  if (weeklyPending.value > 0) return 'Keep going on the remaining sessions.'
-  return 'All scheduled sessions for this week are done.'
-})
-
-function handleStorage(event) {
-  if (!event || event.key === storageKey.value) {
-    loadLogs()
-  }
-}
-
-onMounted(() => {
-  loadLogs()
-  if (typeof window !== 'undefined') {
-    window.addEventListener('storage', handleStorage)
-    window.addEventListener('pf_logs_updated', loadLogs)
-  }
-})
-
-watch(
-  storageKey,
-  () => {
-    loadLogs()
-  },
-  { immediate: true }
-)
-
-onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('storage', handleStorage)
-    window.removeEventListener('pf_logs_updated', loadLogs)
-  }
-})
 </script>
 
 <style scoped>
@@ -314,58 +192,7 @@ onBeforeUnmount(() => {
 .sidebar-bottom {
   margin-top: auto;
   display: grid;
-  gap: 18px;
-}
-
-.goal-card {
-  background: var(--surface-muted);
-  border-radius: 18px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  display: grid;
-  gap: 10px;
-  box-shadow: var(--shadow-soft);
-}
-
-.goal-title {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.goal-progress {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.goal-bar {
-  flex: 1;
-  height: 6px;
-  background: var(--surface-track);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.goal-bar span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  border-radius: 999px;
-}
-
-.goal-count {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--accent-strong);
-}
-
-.goal-card p {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-muted);
+  gap: 0;
 }
 
 @media (max-width: 980px) {
@@ -395,10 +222,6 @@ onBeforeUnmount(() => {
     display: flex;
     align-items: center;
     margin-left: auto;
-  }
-
-  .goal-card {
-    display: none;
   }
 }
 </style>

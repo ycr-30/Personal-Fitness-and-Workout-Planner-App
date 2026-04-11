@@ -12,6 +12,25 @@ WORKOUT_KW = re.compile(
 )
 
 
+def scoped_message(message: str, scope: str) -> str:
+    base = (message or "").strip()
+    if scope == "nutrition":
+        instruction = (
+            "Important scope instruction: answer ONLY the nutrition and dietary part of the request. "
+            "Do not include exercise names, workout routines, sets, reps, or training instructions. "
+            "If the user asked for both workout and nutrition, ignore the workout part here because another specialist will answer it."
+        )
+    elif scope == "workout":
+        instruction = (
+            "Important scope instruction: answer ONLY the workout and exercise part of the request. "
+            "Do not include meal plans, calorie targets, protein targets, macros, or dietary suggestions. "
+            "If the user asked for both workout and nutrition, ignore the nutrition part here because another specialist will answer it."
+        )
+    else:
+        return base
+    return f"{base}\n\n{instruction}"
+
+
 def route(message: str) -> str:
     n = bool(NUTRITION_KW.search(message or ""))
     w = bool(WORKOUT_KW.search(message or ""))

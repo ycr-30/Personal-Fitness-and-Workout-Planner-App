@@ -20,17 +20,20 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import AppHeader from '@/components/AppHeader.vue'
 import FloatingCoachChat from '@/components/FloatingCoachChat.vue'
+import { useUserSettings } from '@/composables/useUserSettings'
 import { syncLocalDataToSupabase, hydrateLocalDataFromSupabase } from '@/lib/supabaseSync'
 import { applyCloudAppStateToLocal, fetchCloudAppState, saveLocalAppStateToCloud } from '@/lib/cloudStateApi'
+import { getStableDeviceId, loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
 import { getIdentityFromUser, getUserStorageKey } from '@/lib/userStorage'
 
 const route = useRoute()
 const auth = useAuthStore()
 auth.init()
+const { settings, loadSettings } = useUserSettings()
 
 const hideShell = computed(() => route.meta?.hideShell)
 const showShell = computed(() => auth.isAuthed && !hideShell.value)
-const showCoachChat = computed(() => auth.isAuthed && route.name === 'dashboard')
+const showCoachChat = computed(() => showShell.value)
 const systemTheme = ref('light')
 const syncInProgress = ref(false)
 const syncTimer = ref(null)
@@ -51,7 +54,47 @@ function backendSyncKeyForUser(user) {
   return `pf_backend_sync_done_${identity}`
 }
 
-const preferredTheme = computed(() => auth.user?.theme || 'light')
+async function hydrateCloudFlags(user) {
+  if (typeof window === 'undefined' || !user) return
+  try {
+    const state = await loadCloudClientState({
+      scope: 'device',
+      deviceId: getStableDeviceId(),
+      keys: ['app_local_flags']
+    })
+    const flags = state?.app_local_flags
+    if (!flags || typeof flags !== 'object') return
+    const key = syncKeyForUser(user)
+    const connectedKey = connectedKeyForUser(user)
+    const backendKey = backendSyncKeyForUser(user)
+    if (flags.supabaseSynced) localStorage.setItem(key, '1')
+    if (flags.connected) localStorage.setItem(connectedKey, '1')
+    if (flags.backendSynced) localStorage.setItem(backendKey, '1')
+  } catch (error) {
+    console.error('Failed to hydrate app flags from cloud', error)
+  }
+}
+
+function syncCloudFlags(user) {
+  if (typeof window === 'undefined' || !user) return
+  const key = syncKeyForUser(user)
+  const connectedKey = connectedKeyForUser(user)
+  const backendKey = backendSyncKeyForUser(user)
+  saveCloudClientState({
+    scope: 'device',
+    deviceId: getStableDeviceId(),
+    stateKey: 'app_local_flags',
+    stateValue: {
+      supabaseSynced: localStorage.getItem(key) === '1',
+      connected: localStorage.getItem(connectedKey) === '1',
+      backendSynced: localStorage.getItem(backendKey) === '1'
+    }
+  }).catch((error) => {
+    console.error('Failed to save app flags to cloud', error)
+  })
+}
+
+const preferredTheme = computed(() => settings.value?.theme || auth.user?.theme || 'light')
 const resolvedTheme = computed(() =>
   preferredTheme.value === 'system' ? systemTheme.value : preferredTheme.value
 )
@@ -69,6 +112,8 @@ watch(
   authIdentity,
   async (identity) => {
     if (!identity || !auth.user || syncInProgress.value) return
+    await loadSettings({ force: true })
+    await hydrateCloudFlags(auth.user)
     const key = syncKeyForUser(auth.user)
     const connectedKey = connectedKeyForUser(auth.user)
     const backendKey = backendSyncKeyForUser(auth.user)
@@ -108,6 +153,7 @@ watch(
       try {
         await saveLocalAppStateToCloud(auth.user)
         localStorage.setItem(backendKey, '1')
+        syncCloudFlags(auth.user)
       } catch (error) {
         console.error('Backend cloud sync failed', error)
       }
@@ -120,6 +166,7 @@ watch(
       if (result?.status === 'done') {
         localStorage.setItem(key, '1')
         localStorage.setItem(connectedKey, '1')
+        syncCloudFlags(auth.user)
       }
     } catch (error) {
       console.error('Cloud sync failed', error)
@@ -138,11 +185,16 @@ function scheduleAutoSync() {
   syncTimer.value = setTimeout(async () => {
     try {
       await saveLocalAppStateToCloud(auth.user)
+      localStorage.setItem(backendSyncKeyForUser(auth.user), '1')
+      syncCloudFlags(auth.user)
     } catch (error) {
       console.error('Backend cloud sync failed', error)
     }
     try {
       await syncLocalDataToSupabase({ interactive: false })
+      localStorage.setItem(syncKeyForUser(auth.user), '1')
+      localStorage.setItem(connectedKeyForUser(auth.user), '1')
+      syncCloudFlags(auth.user)
     } catch (error) {
       console.error('Cloud sync failed', error)
     }
@@ -157,13 +209,14 @@ function updateSystemTheme(event) {
 }
 
 onMounted(() => {
-  if (typeof window === 'undefined' || !window.matchMedia) return
-  mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-  updateSystemTheme(mediaQuery)
-  if (mediaQuery.addEventListener) {
-    mediaQuery.addEventListener('change', updateSystemTheme)
-  } else {
-    mediaQuery.addListener(updateSystemTheme)
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    updateSystemTheme(mediaQuery)
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', updateSystemTheme)
+    } else {
+      mediaQuery.addListener(updateSystemTheme)
+    }
   }
 
   if (typeof window !== 'undefined') {
@@ -175,11 +228,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (!mediaQuery) return
-  if (mediaQuery.removeEventListener) {
-    mediaQuery.removeEventListener('change', updateSystemTheme)
-  } else {
-    mediaQuery.removeListener(updateSystemTheme)
+  if (mediaQuery) {
+    if (mediaQuery.removeEventListener) {
+      mediaQuery.removeEventListener('change', updateSystemTheme)
+    } else {
+      mediaQuery.removeListener(updateSystemTheme)
+    }
   }
   if (typeof window !== 'undefined') {
     window.removeEventListener('pf_logs_updated', scheduleAutoSync)
@@ -220,7 +274,7 @@ onBeforeUnmount(() => {
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --app-bg: linear-gradient(180deg, #0b1120 0%, #111827 100%);
+  --app-bg: #111827;
   --surface: #111827;
   --surface-muted: #1f2937;
   --surface-soft: #111c2c;
@@ -252,6 +306,7 @@ body,
 #app {
   height: 100%;
   margin: 0;
+  background: var(--app-bg);
 }
 
 body {
@@ -292,18 +347,19 @@ button:hover,
 
 .app-frame {
   min-height: 100%;
+  background: var(--app-bg);
 }
 
 .app-shell {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  background: transparent;
+  background: var(--app-bg);
 }
 
 .app-main {
   min-height: 100vh;
-  background: transparent;
+  background: var(--app-bg);
 }
 
 .app-main.compact {

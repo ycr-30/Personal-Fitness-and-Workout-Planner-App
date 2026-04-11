@@ -91,7 +91,7 @@
         <div class="card-header">
           <div>
             <h2>Weight Progression</h2>
-            <p>Tracking over last 30 days</p>
+            <p>{{ weightHeadline }}</p>
           </div>
           <div class="filter">
             <button class="chip" type="button" @click="toggleWeightFilter">
@@ -111,6 +111,7 @@
             </div>
           </div>
         </div>
+        <p class="chart-status">{{ weightStatusLine }}</p>
         <div class="chart-area">
           <div class="chart-grid">
             <div class="y-axis">
@@ -118,13 +119,6 @@
             </div>
             <div class="chart-plot">
               <svg viewBox="0 0 520 180" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-                <defs>
-                  <linearGradient id="weightFill" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stop-color="#fca5a5" stop-opacity="0.45" />
-                    <stop offset="100%" stop-color="#fca5a5" stop-opacity="0.05" />
-                  </linearGradient>
-                </defs>
-                <path :d="weightChart.area" fill="url(#weightFill)" />
                 <path
                   :d="weightChart.line"
                   fill="none"
@@ -148,6 +142,10 @@
           <div class="chart-labels x-axis">
             <span v-for="label in weightChartAxis.xLabels" :key="label">{{ label }}</span>
           </div>
+        </div>
+        <div class="chart-summary">
+          <span>{{ weightVisibleLogCount }} logs in visible range</span>
+          <span>{{ weightSummaryHint }}</span>
         </div>
       </article>
 
@@ -175,6 +173,15 @@
                 </button>
               </div>
             </div>
+          </div>
+          <div class="task-meta-row">
+            <span
+              v-for="item in todayWorkoutMetaItems"
+              :key="item"
+              class="task-meta-pill"
+            >
+              {{ item }}
+            </span>
           </div>
           <div v-if="todayWorkouts.length" class="workout-list">
             <div
@@ -217,18 +224,95 @@
             <p v-if="isRestDayToday" class="rest-day-text">Rest Day</p>
             <p v-else>No workout logged for today yet.</p>
           </div>
-          <button class="btn full" type="button" @click="goToLogs">View Full Routine</button>
+          <div class="card-actions split">
+            <button class="btn primary wide" type="button" @click="goToLogs">Start workout</button>
+            <button class="btn ghost wide" type="button" @click="openSchedule">View routine</button>
+          </div>
         </article>
 
-        <article class="insight-card">
-          <div class="insight-header">
-            <span class="dot"></span>
-            <span>Daily Insight</span>
+        <article class="focus-card">
+          <div class="card-header">
+            <div>
+              <h2>Today Focus</h2>
+              <p>What matters most today</p>
+            </div>
           </div>
-          <h3>{{ insightTitle }}</h3>
-          <p class="insight-text">{{ insightCopy }}</p>
+          <div class="focus-list">
+            <div
+              v-for="item in todayFocusItems"
+              :key="item.label"
+              class="focus-item"
+            >
+              <span class="focus-label">{{ item.label }}</span>
+              <p class="focus-value">{{ item.value }}</p>
+            </div>
+          </div>
         </article>
       </div>
+    </section>
+
+    <section class="dashboard-secondary">
+      <article class="goal-progress-card">
+        <div class="card-header">
+          <div>
+            <h2>Goal Progress</h2>
+            <p>This week's consistency target</p>
+          </div>
+        </div>
+        <div class="progress-list">
+          <div
+            v-for="item in goalProgressItems"
+            :key="item.label"
+            class="progress-item"
+          >
+            <div class="progress-topline">
+              <div>
+                <div class="progress-title-row">
+                  <strong>{{ item.label }}</strong>
+                  <span v-if="item.badge" class="micro-badge">{{ item.badge }}</span>
+                </div>
+                <p>{{ item.helper }}</p>
+              </div>
+              <span>{{ item.current }} / {{ item.target }}</span>
+            </div>
+            <div class="progress-track">
+              <span :style="{ width: `${item.progress}%` }"></span>
+            </div>
+          </div>
+        </div>
+        <p class="section-note">{{ goalProgressNote }}</p>
+        <div class="card-actions">
+          <button class="btn ghost wide" type="button" @click="openAnalytics">View Analytics</button>
+        </div>
+      </article>
+
+      <article class="nutrition-snapshot-card">
+        <div class="card-header">
+          <div>
+            <h2>Nutrition Snapshot</h2>
+            <p>Today's nutrition overview</p>
+          </div>
+        </div>
+        <div class="snapshot-grid">
+          <div
+            v-for="item in nutritionSnapshotItems"
+            :key="item.label"
+            class="snapshot-item"
+          >
+            <div class="snapshot-topline">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.current }} / {{ item.target }}</strong>
+            </div>
+            <div class="snapshot-track">
+              <span :style="{ width: `${item.progress}%` }"></span>
+            </div>
+          </div>
+        </div>
+        <p class="snapshot-status">{{ nutritionStatusLine }}</p>
+        <div class="card-actions">
+          <button class="btn ghost wide" type="button" @click="openNutrition">Open Nutrition</button>
+        </div>
+      </article>
     </section>
 
     <transition name="fade">
@@ -495,7 +579,12 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { supabase } from '@/lib/supabaseClient'
+import { formatSupabaseError, mapMealEntryRow, mapWaterEntryRow, requireNutritionUser } from '@/lib/nutritionSupabase'
+import { buildFallbackNutritionTargetRecommendation } from '@/lib/nutritionGoalSync'
 import { getUserStorageKey } from '@/lib/userStorage'
+import { buildNutritionSummary } from '@/utils/nutritionCalculations'
+import { buildPlanGoalLink } from '@/utils/nutritionGoalMapping'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -512,6 +601,14 @@ const greeting = computed(() => {
 
 function goToLogs() {
   router.push({ name: 'logs' })
+}
+
+function openAnalytics() {
+  router.push({ name: 'progress' })
+}
+
+function openNutrition() {
+  router.push({ name: 'nutrition' })
 }
 
 function logWorkoutQuick() {
@@ -750,6 +847,11 @@ const logForm = reactive({
   location: '',
   exercises: []
 })
+const nutritionGoals = ref(null)
+const nutritionMealEntries = ref([])
+const nutritionWaterEntries = ref([])
+const weeklyWaterDays = ref(0)
+const nutritionError = ref('')
 
 const locationSuggestions = ["Gold's Gym", 'Home', 'Uni Gym']
 const muscleGroupOptions = [
@@ -979,6 +1081,49 @@ function parseDuration(text) {
   return hours * 60 + minutes
 }
 
+function readStorageJson(key, fallback) {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const raw = window.localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writeStorageJson(key, value) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {}
+}
+
+function startOfWeek(date) {
+  const next = new Date(date)
+  next.setHours(0, 0, 0, 0)
+  next.setDate(next.getDate() - next.getDay())
+  return next
+}
+
+function endOfWeek(date) {
+  const next = startOfWeek(date)
+  next.setDate(next.getDate() + 6)
+  next.setHours(23, 59, 59, 999)
+  return next
+}
+
+function getWorkoutMinutes(workout) {
+  if (!workout) return 0
+  const minutesFromExercises = Array.isArray(workout.exercises)
+    ? workout.exercises.reduce((acc, exercise) => {
+        const hours = Number(exercise.durationHours) || 0
+        const mins = Number(exercise.durationMinutes) || 0
+        return acc + hours * 60 + mins
+      }, 0)
+    : 0
+  return minutesFromExercises || parseDuration(workout.duration)
+}
+
 function toIsoDate(date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -991,14 +1136,7 @@ function buildDailyMinutesMap(items) {
   items.forEach((workout) => {
     const date = parseLocalDate(workout.date)
     if (!date) return
-    const minutesFromExercises = Array.isArray(workout.exercises)
-      ? workout.exercises.reduce((acc, exercise) => {
-          const hours = Number(exercise.durationHours) || 0
-          const mins = Number(exercise.durationMinutes) || 0
-          return acc + hours * 60 + mins
-        }, 0)
-      : 0
-    const minutes = minutesFromExercises || parseDuration(workout.duration)
+    const minutes = getWorkoutMinutes(workout)
     if (!minutes) return
     const key = toIsoDate(date)
     map[key] = (map[key] || 0) + minutes
@@ -1045,67 +1183,6 @@ function trendMeta(current, previous) {
   if (rounded > 0) return { label, tone: 'positive' }
   if (rounded < 0) return { label, tone: 'negative' }
   return { label: '0%', tone: 'neutral' }
-}
-
-const insightMap = {
-  Chest: {
-    warmup: 'Warm-up: 5 min cardio + band pull-aparts and light push-ups.',
-    stretch: 'Stretch: doorway chest stretch 2 x 30s each side.',
-    nutrition: 'Nutrition: protein + carbs within 60 min post-workout.'
-  },
-  Back: {
-    warmup: 'Warm-up: cat-cow, band rows, and scapular retractions.',
-    stretch: 'Stretch: lat stretch and thoracic opener 2 x 30s.',
-    nutrition: 'Nutrition: protein + complex carbs to support recovery.'
-  },
-  Legs: {
-    warmup: 'Warm-up: leg swings, hip openers, bodyweight squats.',
-    stretch: 'Stretch: quads, hamstrings, calves 2 x 30s.',
-    nutrition: 'Nutrition: extra carbs + electrolytes for leg day.'
-  },
-  Shoulders: {
-    warmup: 'Warm-up: arm circles, band external rotations, light presses.',
-    stretch: 'Stretch: cross-body shoulder stretch 2 x 30s.',
-    nutrition: 'Nutrition: protein + hydration to support joints.'
-  },
-  Arms: {
-    warmup: 'Warm-up: wrist circles, light curls/extensions.',
-    stretch: 'Stretch: triceps and forearms 2 x 30s.',
-    nutrition: 'Nutrition: protein + carbs for arm recovery.'
-  },
-  Core: {
-    warmup: 'Warm-up: dead bug, glute bridges, plank activation.',
-    stretch: 'Stretch: cobra pose and child’s pose 2 x 30s.',
-    nutrition: 'Nutrition: protein + fluids to aid recovery.'
-  },
-  Cardio: {
-    warmup: 'Warm-up: 5 min easy cardio + ankle mobility.',
-    stretch: 'Stretch: calves, hips, and hamstrings 2 x 30s.',
-    nutrition: 'Nutrition: carbs + electrolytes post-session.'
-  },
-  'Full Body': {
-    warmup: 'Warm-up: 5–8 min cardio + dynamic mobility.',
-    stretch: 'Stretch: full-body flow focusing on hips/shoulders.',
-    nutrition: 'Nutrition: balanced protein + carbs after training.'
-  }
-}
-
-function normalizeMuscleGroup(tag) {
-  const map = {
-    Quads: 'Legs',
-    Hamstrings: 'Legs',
-    Glutes: 'Legs',
-    Calves: 'Legs',
-    'Lower Back': 'Back',
-    'Upper Back': 'Back',
-    'Rear Delts': 'Shoulders',
-    Traps: 'Shoulders',
-    Biceps: 'Arms',
-    Triceps: 'Arms',
-    Forearms: 'Arms',
-    Grip: 'Arms'
-  }
-  return map[tag] || tag || 'Full Body'
 }
 
 function buildWeeklyWeightSeries(records, fallbackWeight, rangeDays = 30) {
@@ -1343,6 +1420,22 @@ const todayLogItems = computed(() => {
 })
 
 const dailyMinutesMap = computed(() => buildDailyMinutesMap(logs.value))
+const currentWeekStart = computed(() => startOfWeek(new Date()))
+const currentWeekEnd = computed(() => endOfWeek(new Date()))
+const currentWeekLogs = computed(() => {
+  return logs.value.filter((item) => {
+    const date = parseLocalDate(item?.date)
+    return date && date >= currentWeekStart.value && date <= currentWeekEnd.value
+  })
+})
+const weeklyCompleted = computed(() => currentWeekLogs.value.filter((item) => item.status === 'completed').length)
+const weeklyPending = computed(() => currentWeekLogs.value.filter((item) => item.status !== 'completed').length)
+const weeklyCompletedMinutes = computed(() =>
+  currentWeekLogs.value
+    .filter((item) => item.status === 'completed')
+    .reduce((sum, item) => sum + getWorkoutMinutes(item), 0)
+)
+const weeklyScheduledMinutes = computed(() => currentWeekLogs.value.reduce((sum, item) => sum + getWorkoutMinutes(item), 0))
 
 const todayKey = computed(() => toIsoDate(new Date()))
 const isRestDayToday = computed(() => {
@@ -1359,6 +1452,15 @@ const yesterdayKey = computed(() => {
   date.setDate(date.getDate() - 1)
   return toIsoDate(date)
 })
+const nutritionUserKey = computed(
+  () => auth.user?.id || auth.user?.accountKey || auth.user?.email || auth.user?.name || 'nutrition-user'
+)
+const nutritionGoalsCacheKey = computed(() => `pf_nutrition_goals:${nutritionUserKey.value}`)
+const nutritionMealsCacheKey = computed(() => `pf_nutrition_meals:${nutritionUserKey.value}:${todayKey.value}`)
+const nutritionWaterCacheKey = computed(() => `pf_nutrition_water:${nutritionUserKey.value}:${todayKey.value}`)
+const weeklyWaterDaysCacheKey = computed(
+  () => `pf_dashboard_weekly_water_days:${nutritionUserKey.value}:${toIsoDate(currentWeekStart.value)}`
+)
 
 const activeMinutes = computed(() => dailyMinutesMap.value[todayKey.value] || 0)
 const activeMinutesPrev = computed(() => dailyMinutesMap.value[yesterdayKey.value] || 0)
@@ -1369,6 +1471,92 @@ const minutesDisplay = computed(() => activeMinutes.value || 0)
 const caloriesDisplay = computed(() => caloriesBurned.value || 0)
 const minutesTrend = computed(() => trendMeta(activeMinutes.value, activeMinutesPrev.value))
 const caloriesTrend = computed(() => trendMeta(caloriesBurned.value, caloriesPrev.value))
+
+function loadDashboardNutritionCache() {
+  const cachedGoals = readStorageJson(nutritionGoalsCacheKey.value, nutritionGoals.value)
+  const cachedMeals = readStorageJson(nutritionMealsCacheKey.value, nutritionMealEntries.value)
+  const cachedWater = readStorageJson(nutritionWaterCacheKey.value, nutritionWaterEntries.value)
+  const cachedWaterDays = readStorageJson(weeklyWaterDaysCacheKey.value, weeklyWaterDays.value)
+
+  nutritionGoals.value = cachedGoals && typeof cachedGoals === 'object' ? cachedGoals : null
+  nutritionMealEntries.value = Array.isArray(cachedMeals) ? cachedMeals : []
+  nutritionWaterEntries.value = Array.isArray(cachedWater) ? cachedWater : []
+  weeklyWaterDays.value = Number.isFinite(Number(cachedWaterDays)) ? Number(cachedWaterDays) : 0
+}
+
+async function refreshDashboardNutrition() {
+  if (!supabase) return
+
+  try {
+    const user = await requireNutritionUser()
+    const weekStartKey = toIsoDate(currentWeekStart.value)
+    const weekEndKey = toIsoDate(currentWeekEnd.value)
+
+    const [goalsResponse, mealsResponse, waterResponse, weeklyWaterResponse] = await Promise.all([
+      supabase.from('user_nutrition_goals').select('*').eq('user_id', user.id).maybeSingle(),
+      supabase
+        .from('meal_entries')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('entry_date', todayKey.value)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('water_entries')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('entry_date', todayKey.value)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('water_entries')
+        .select('entry_date')
+        .eq('user_id', user.id)
+        .gte('entry_date', weekStartKey)
+        .lte('entry_date', weekEndKey)
+    ])
+
+    if (goalsResponse.error && goalsResponse.error.code !== 'PGRST116') throw goalsResponse.error
+    if (mealsResponse.error) throw mealsResponse.error
+    if (waterResponse.error) throw waterResponse.error
+    if (weeklyWaterResponse.error) throw weeklyWaterResponse.error
+
+    nutritionGoals.value = goalsResponse.data || nutritionGoals.value
+    nutritionMealEntries.value = Array.isArray(mealsResponse.data)
+      ? mealsResponse.data.map((row) => mapMealEntryRow(row))
+      : []
+    nutritionWaterEntries.value = Array.isArray(waterResponse.data)
+      ? waterResponse.data.map((row) => mapWaterEntryRow(row))
+      : []
+    weeklyWaterDays.value = new Set(
+      (weeklyWaterResponse.data || []).map((item) => item.entry_date).filter(Boolean)
+    ).size
+
+    writeStorageJson(nutritionGoalsCacheKey.value, nutritionGoals.value)
+    writeStorageJson(nutritionMealsCacheKey.value, nutritionMealEntries.value)
+    writeStorageJson(nutritionWaterCacheKey.value, nutritionWaterEntries.value)
+    writeStorageJson(weeklyWaterDaysCacheKey.value, weeklyWaterDays.value)
+    nutritionError.value = ''
+  } catch (error) {
+    nutritionError.value = formatSupabaseError(error, 'Unable to refresh dashboard nutrition data.')
+  }
+}
+
+const fallbackNutritionGoals = computed(() =>
+  buildFallbackNutritionTargetRecommendation({
+    authUser: auth.user,
+    planState: planState.value,
+    goalType: buildPlanGoalLink(planState.value).nutritionGoalType
+  })
+)
+
+const dashboardNutritionGoals = computed(() => nutritionGoals.value || fallbackNutritionGoals.value)
+const dashboardNutritionSummary = computed(() =>
+  buildNutritionSummary({
+    mealEntries: nutritionMealEntries.value,
+    waterEntries: nutritionWaterEntries.value,
+    goals: dashboardNutritionGoals.value,
+    exerciseBurn: caloriesBurned.value
+  })
+)
 
 const weightRecordsSorted = computed(() => {
   const records = Array.isArray(planState.value.weightRecords) ? planState.value.weightRecords : []
@@ -1432,6 +1620,43 @@ const activeRangeLabel = computed(() => {
   return weightRangeOptions.find((item) => item.value === weightRange.value)?.label || 'Last 30 Days'
 })
 
+const visibleWeightRecords = computed(() => {
+  const rangeDays = weightRangeOptions.find((item) => item.value === weightRange.value)?.days || 30
+  const end = new Date()
+  end.setHours(23, 59, 59, 999)
+  const start = new Date()
+  start.setDate(end.getDate() - (rangeDays - 1))
+  start.setHours(0, 0, 0, 0)
+  return weightRecordsSorted.value.filter((record) => {
+    const date = parseLocalDate(record.date)
+    return date && date >= start && date <= end
+  })
+})
+
+const weightVisibleLogCount = computed(() => visibleWeightRecords.value.length)
+
+const weightHeadline = computed(() => {
+  if (!hasWeightData.value) return 'No weight logs yet'
+  return `${weightDisplay.value} kg latest`
+})
+
+const weightStatusLine = computed(() => {
+  const rangeDays = weightRangeOptions.find((item) => item.value === weightRange.value)?.days || 30
+  if (visibleWeightRecords.value.length < 2) return `Stable in the last ${rangeDays} days`
+  const first = Number(visibleWeightRecords.value[0]?.weight) || 0
+  const last = Number(visibleWeightRecords.value[visibleWeightRecords.value.length - 1]?.weight) || 0
+  const delta = last - first
+  if (Math.abs(delta) < 0.3) return `Stable in the last ${rangeDays} days`
+  if (delta > 0) return `Up ${delta.toFixed(1)} kg in the last ${rangeDays} days`
+  return `Down ${Math.abs(delta).toFixed(1)} kg in the last ${rangeDays} days`
+})
+
+const weightSummaryHint = computed(() => {
+  if (!weightVisibleLogCount.value) return 'Add more weigh-ins to start your trend.'
+  if (weightVisibleLogCount.value < 4) return 'Add more weigh-ins for a clearer trend.'
+  return 'The trend is becoming clearer with consistent logging.'
+})
+
 const todaySummary = computed(() => {
   if (isRestDayToday.value) return 'Rest Day'
   if (!todayWorkouts.value.length) return 'No workout logged today'
@@ -1440,43 +1665,141 @@ const todaySummary = computed(() => {
   return primary.title
 })
 
-const todayMuscleGroups = computed(() => {
-  const today = new Date()
-  const groups = []
-  logs.value.forEach((item) => {
-    const date = parseLocalDate(item.date)
-    if (!date || !isSameDay(date, today)) return
-    const tags = Array.isArray(item.tags) ? item.tags : []
-    const exerciseTags = Array.isArray(item.exercises)
-      ? item.exercises.flatMap((exercise) => exercise.tags || [])
-      : []
-    groups.push(...tags, ...exerciseTags)
-  })
-  return groups.filter(Boolean)
+const todayWorkoutMetaItems = computed(() => {
+  if (isRestDayToday.value) return ['Rest day', 'Recovery focus']
+  const primary = todayWorkouts.value[0]
+  if (!primary) return ['No session scheduled', 'Add a workout']
+  const items = ['Scheduled today']
+  const exerciseCount = Array.isArray(primary.exercises) ? primary.exercises.length : 0
+  if (exerciseCount) items.push(`${exerciseCount} exercise${exerciseCount > 1 ? 's' : ''}`)
+  if (primary.duration) items.push(`Estimated ${primary.duration}`)
+  return items
 })
 
-const insightTitle = computed(() => {
-  if (!todayMuscleGroups.value.length) return 'Daily Recovery Tip'
-  const focus = primaryMuscleGroup.value
-  return `${focus} Day Prep`
+const weeklyMinutesTarget = computed(() => {
+  const configured = Number(planState.value?.challengeValues?.duration) || 0
+  if (configured > 0) return configured * 7
+  return weeklyScheduledMinutes.value
 })
 
-const insightCopy = computed(() => {
-  if (!todayMuscleGroups.value.length) {
-    return 'Log a workout to unlock warm-up, stretch, and fueling tips for today.'
+const goalProgressItems = computed(() => {
+  const workoutsTarget = weeklyCompleted.value + weeklyPending.value
+  return [
+    {
+      label: 'Workouts',
+      helper: 'Scheduled sessions this week',
+      badge: workoutsTarget ? 'Primary weekly goal' : '',
+      current: weeklyCompleted.value,
+      target: workoutsTarget,
+      progress: workoutsTarget ? Math.round((weeklyCompleted.value / workoutsTarget) * 100) : 0
+    },
+    {
+      label: 'Minutes',
+      helper: 'Completed training minutes',
+      badge: '',
+      current: weeklyCompletedMinutes.value,
+      target: weeklyMinutesTarget.value,
+      progress: weeklyMinutesTarget.value
+        ? Math.round((weeklyCompletedMinutes.value / weeklyMinutesTarget.value) * 100)
+        : 0
+    },
+    {
+      label: 'Water days',
+      helper: 'Days hydrated this week',
+      badge: '',
+      current: weeklyWaterDays.value,
+      target: 7,
+      progress: Math.round((weeklyWaterDays.value / 7) * 100)
+    }
+  ].map((item) => ({
+    ...item,
+    progress: Math.min(100, Math.max(0, item.progress))
+  }))
+})
+
+const goalProgressNote = computed(() => {
+  if (weeklyCompleted.value + weeklyPending.value === 0 && weeklyCompletedMinutes.value === 0) {
+    return 'No weekly plan is scheduled yet. Start by adding your next session.'
   }
-  const advice = insightMap[primaryMuscleGroup.value] || insightMap['Full Body']
-  return `${advice.warmup}\n${advice.stretch}\n${advice.nutrition}`
+  if (weeklyPending.value > 0) return 'Keep momentum going by closing out the remaining scheduled sessions.'
+  if (weeklyCompleted.value > 0) return 'You are on track this week. Keep the routine steady.'
+  return 'This week is still open. Start with one focused session today.'
 })
 
-const primaryMuscleGroup = computed(() => {
-  if (!todayMuscleGroups.value.length) return 'Full Body'
-  const counts = {}
-  todayMuscleGroups.value.forEach((tag) => {
-    const group = normalizeMuscleGroup(tag)
-    counts[group] = (counts[group] || 0) + 1
-  })
-  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0]
+const nutritionSnapshotItems = computed(() => {
+  const summary = dashboardNutritionSummary.value
+  return [
+    {
+      label: 'Calories',
+      current: `${Math.round(summary.consumedCalories)}`,
+      target: `${Math.round(summary.targets.calories)} kcal`,
+      progress: summary.completion.caloriesPercent
+    },
+    {
+      label: 'Protein',
+      current: `${Math.round(summary.proteinG)} g`,
+      target: `${Math.round(summary.targets.protein)} g`,
+      progress: summary.completion.proteinPercent
+    },
+    {
+      label: 'Water',
+      current: `${Math.round(summary.waterMl)} ml`,
+      target: `${Math.round(summary.targets.water)} ml`,
+      progress: summary.completion.waterPercent
+    }
+  ]
+})
+
+const nutritionStatusLine = computed(() => {
+  const summary = dashboardNutritionSummary.value
+  const gaps = [
+    { key: 'protein', label: 'Protein is your main focus today', percent: summary.completion.proteinPercent },
+    { key: 'water', label: 'Hydration is your main focus today', percent: summary.completion.waterPercent },
+    { key: 'calories', label: 'Calories are still low for today', percent: summary.completion.caloriesPercent }
+  ].sort((left, right) => left.percent - right.percent)
+
+  if (summary.consumedCalories === 0 && summary.waterMl === 0) {
+    return 'Nothing has been logged yet for today.'
+  }
+  if (gaps[0].percent >= 100) return 'Today looks balanced across your main targets.'
+  return gaps[0].label
+})
+
+const nutritionStatusHint = computed(() => {
+  if (nutritionError.value && nutritionMealEntries.value.length === 0 && nutritionWaterEntries.value.length === 0) {
+    return 'Showing your latest saved nutrition targets while cloud data sync catches up.'
+  }
+  return 'Live summary from today’s meals, water entries, and active nutrition targets.'
+})
+
+const todayFocusItems = computed(() => {
+  const summary = dashboardNutritionSummary.value
+  const workoutValue = isRestDayToday.value
+    ? 'Recovery day'
+    : todayWorkouts.value.length
+      ? `${todayWorkouts.value[0].title}${todayWorkouts.value[0].duration ? ` · ${todayWorkouts.value[0].duration}` : ''}`
+      : 'No workout scheduled yet'
+  const proteinRemaining = Math.max(0, Math.round(summary.targets.protein - summary.proteinG))
+  const waterRemaining = Math.max(0, Math.round(summary.targets.water - summary.waterMl))
+
+  return [
+    {
+      label: 'Workout',
+      value: workoutValue
+    },
+    {
+      label: 'Nutrition',
+      value: summary.targets.protein
+        ? `Protein remaining: ${proteinRemaining} g`
+        : 'Protein target not set'
+    },
+    {
+      label: 'Hydration',
+      value: summary.targets.water
+        ? `${waterRemaining} ml left today`
+        : 'Water target not set'
+    }
+  ]
 })
 
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -1646,6 +1969,8 @@ watch(
     loadLogs()
     loadPlan()
     loadRestDays()
+    loadDashboardNutritionCache()
+    refreshDashboardNutrition()
   },
   { immediate: true }
 )
@@ -1654,10 +1979,14 @@ onMounted(() => {
   loadLogs()
   loadPlan()
   loadRestDays()
+  loadDashboardNutritionCache()
+  refreshDashboardNutrition()
   if (typeof window !== 'undefined') {
     window.addEventListener('storage', handleStorage)
     window.addEventListener('pf_logs_updated', loadLogs)
     window.addEventListener('pf_plan_updated', loadPlan)
+    window.addEventListener('pf_nutrition_updated', refreshDashboardNutrition)
+    window.addEventListener('pf_rest_updated', loadRestDays)
     window.addEventListener('click', closeWeightFilterOnOutside)
     window.addEventListener('click', closeTodayMenu)
   }
@@ -1668,6 +1997,8 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', handleStorage)
     window.removeEventListener('pf_logs_updated', loadLogs)
     window.removeEventListener('pf_plan_updated', loadPlan)
+    window.removeEventListener('pf_nutrition_updated', refreshDashboardNutrition)
+    window.removeEventListener('pf_rest_updated', loadRestDays)
     window.removeEventListener('click', closeWeightFilterOnOutside)
     window.removeEventListener('click', closeTodayMenu)
   }
@@ -1679,6 +2010,7 @@ onBeforeUnmount(() => {
   padding: 36px clamp(20px, 4vw, 48px) 60px;
   display: grid;
   gap: 32px;
+  background: transparent;
 }
 
 .dashboard-hero {
@@ -1710,6 +2042,7 @@ onBeforeUnmount(() => {
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   border-radius: 14px;
   padding: 10px 16px;
@@ -1717,6 +2050,7 @@ onBeforeUnmount(() => {
   background: var(--surface);
   font-weight: 600;
   color: var(--text-primary);
+  text-align: center;
   box-shadow: var(--shadow-soft);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -2076,6 +2410,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  background: transparent;
 }
 
 .stat-card {
@@ -2175,7 +2510,9 @@ onBeforeUnmount(() => {
 
 .chart-card,
 .workout-card,
-.insight-card {
+.focus-card,
+.goal-progress-card,
+.nutrition-snapshot-card {
   background: var(--surface);
   border-radius: 22px;
   padding: 22px;
@@ -2219,11 +2556,12 @@ onBeforeUnmount(() => {
 }
 
 .chart-area {
-  margin-top: 20px;
+  margin-top: 16px;
   display: flex;
   flex-direction: column;
   flex: 1;
-  gap: 12px;
+  min-height: 0;
+  gap: 10px;
 }
 
 .chart-grid {
@@ -2231,7 +2569,8 @@ onBeforeUnmount(() => {
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 10px;
   align-items: stretch;
-  height: 100%;
+  flex: 1;
+  min-height: 280px;
 }
 
 .y-axis {
@@ -2247,11 +2586,13 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
 }
 
 .chart-plot svg {
   width: 100%;
-  height: 180px;
+  height: 100%;
+  min-height: 280px;
 }
 
 .chart-labels {
@@ -2305,6 +2646,214 @@ onBeforeUnmount(() => {
 .side-stack {
   display: grid;
   gap: 20px;
+  grid-template-rows: auto auto;
+  align-content: stretch;
+}
+
+.chart-status {
+  margin: 10px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.focus-card,
+.goal-progress-card,
+.nutrition-snapshot-card,
+.workout-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.focus-list,
+.progress-list,
+.snapshot-grid {
+  margin-top: 18px;
+}
+
+.focus-list {
+  display: grid;
+  gap: 12px;
+}
+
+.focus-item {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--surface-muted);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, white);
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  text-align: center;
+}
+
+.focus-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.focus-item p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.focus-value {
+  font-size: 15px !important;
+  font-weight: 700;
+  line-height: 1.35 !important;
+}
+
+.dashboard-secondary {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  background: transparent;
+}
+
+.progress-list {
+  display: grid;
+  gap: 18px;
+}
+
+.chart-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 76%, white);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.chart-summary span:last-child {
+  text-align: right;
+}
+
+.progress-item {
+  display: grid;
+  gap: 10px;
+}
+
+.progress-topline,
+.snapshot-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-topline strong,
+.snapshot-topline strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.progress-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.micro-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 78%, white);
+}
+
+.progress-topline p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.progress-topline span,
+.snapshot-topline span {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.progress-track,
+.snapshot-track {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-track) 82%, transparent);
+}
+
+.progress-track span,
+.snapshot-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #f87171, #fb7185);
+}
+
+.snapshot-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.snapshot-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 94%, transparent),
+      color-mix(in srgb, var(--surface-muted) 92%, transparent)
+    );
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.snapshot-status {
+  margin: 18px 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.section-note {
+  margin: 16px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.card-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+.card-actions.split {
+  padding-top: 16px;
+}
+
+.card-actions .wide {
+  flex: 1;
 }
 
 .schedule-backdrop {
@@ -2562,9 +3111,29 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 14px;
   margin-top: 18px;
-  max-height: 360px;
+  max-height: 260px;
   overflow-y: auto;
   padding-right: 6px;
+}
+
+.task-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.task-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .workout-item {
@@ -2656,47 +3225,6 @@ onBeforeUnmount(() => {
   margin: 6px 0;
 }
 
-.insight-card {
-  background: linear-gradient(140deg, #111827, #1f2937);
-  color: #f9fafb;
-  border: none;
-}
-
-.insight-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #fca5a5;
-  font-weight: 700;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #f97316;
-}
-
-.insight-card h3 {
-  margin: 14px 0 8px;
-  font-size: 20px;
-  font-family: var(--font-display);
-}
-
-.insight-card p {
-  margin: 0;
-  color: #e2e8f0;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.insight-text {
-  white-space: pre-line;
-}
-
 @keyframes rise {
   from {
     opacity: 0;
@@ -2711,12 +3239,47 @@ onBeforeUnmount(() => {
 @media (max-width: 1100px) {
   .dashboard-main {
     grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .dashboard-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .side-stack {
+    grid-template-rows: auto;
+  }
+
+  .chart-summary {
+    flex-direction: column;
+  }
+
+  .chart-grid {
+    min-height: 220px;
+  }
+
+  .chart-plot svg {
+    min-height: 220px;
   }
 }
 
 @media (max-width: 720px) {
   .dashboard-hero {
     align-items: flex-start;
+  }
+
+  .snapshot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .progress-topline,
+  .snapshot-topline {
+    flex-direction: column;
+  }
+
+  .card-actions,
+  .card-actions.split {
+    flex-direction: column;
   }
 }
 </style>

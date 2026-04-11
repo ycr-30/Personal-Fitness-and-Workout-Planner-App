@@ -5,6 +5,8 @@ import { OAuth2Client } from 'google-auth-library'
 import jwt from 'jsonwebtoken'
 import appleSignin from 'apple-signin-auth'
 import { PrismaClient } from '@prisma/client'
+import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { promisify } from 'node:util'
 import 'dotenv/config'
 
 const {
@@ -18,6 +20,8 @@ const {
   APPLE_KEY_ID,
   APPLE_PRIVATE_KEY,
   APPLE_REDIRECT_URI,
+  SUPABASE_URL = '',
+  SUPABASE_SERVICE_ROLE_KEY = '',
   AI_CHAT_API_URL = '',
   AI_CHAT_API_KEY = '',
   AI_CHAT_API_FORMAT = 'custom',
@@ -133,6 +137,10 @@ const PRODUCT_HELP_DOCS = [
       'Typical release flow: verify locally (frontend + backend), push to GitHub, set production env vars (database and AI endpoints), run migrations on production database, then deploy frontend and backend.'
   }
 ]
+const EMAIL_PATTERN = /^\S+@\S+\.\S+$/
+const USERNAME_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/
+const LEGACY_VERIFICATION_TTL_MS = 10 * 60 * 1000
+const scryptAsync = promisify(scrypt)
 
 function normalizeDatabaseUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return rawUrl
@@ -166,6 +174,371 @@ const prisma = new PrismaClient(
       }
     : undefined
 )
+
+function normalizeOptionalText(value) {
+  const text = String(value || '').trim()
+  return text || null
+}
+
+function normalizeLocalAccount(value) {
+  return String(value || '').trim()
+}
+
+function normalizeAccountKey(value) {
+  return normalizeLocalAccount(value).toLowerCase()
+}
+
+function normalizeOptionalEmail(value) {
+  const text = String(value || '').trim().toLowerCase()
+  return text || null
+}
+
+function normalizeNumber(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function toIsoString(value) {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function hashVerificationCode(code) {
+  return createHash('sha256').update(String(code || '')).digest('hex')
+}
+
+async function hashPasswordSecret(password, salt = randomBytes(16).toString('hex')) {
+  const derived = await scryptAsync(String(password || ''), salt, 64)
+  return {
+    salt,
+    hash: Buffer.from(derived).toString('hex')
+  }
+}
+
+async function verifyPasswordSecret(password, salt, expectedHash) {
+  if (!salt || !expectedHash) return false
+  const derived = await scryptAsync(String(password || ''), String(salt), 64)
+  const actual = Buffer.from(derived).toString('hex')
+  const actualBuffer = Buffer.from(actual, 'hex')
+  const expectedBuffer = Buffer.from(String(expectedHash), 'hex')
+  if (actualBuffer.length !== expectedBuffer.length) return false
+  return timingSafeEqual(actualBuffer, expectedBuffer)
+}
+
+function createVerificationCode() {
+  return String(Math.floor(100000 + Math.random() * 900000))
+}
+
+function normalizeLocalRegistrationPayload(payload = {}) {
+  const account = normalizeLocalAccount(payload.account)
+  const accountKey = normalizeAccountKey(account)
+  const accountIsEmail = EMAIL_PATTERN.test(account)
+  const email = normalizeOptionalEmail(payload.email) || (accountIsEmail ? accountKey : null)
+  const name = normalizeOptionalText(payload.name)
+  const password = String(payload.password || '')
+  const sex = String(payload.sex || '').trim().toLowerCase() === 'male' ? 'male' : 'female'
+  const birthday = normalizeOptionalText(payload.birthday)
+  const height = normalizeNumber(payload.height)
+  const weight = normalizeNumber(payload.weight)
+  const avatar = normalizeOptionalText(payload.avatarData || payload.avatar)
+
+  if (!account || (!accountIsEmail && !USERNAME_PATTERN.test(account))) {
+    throw new Error('Please enter a valid account or email.')
+  }
+  if (!name) {
+    throw new Error('Name is required.')
+  }
+  if (password.length < 6) {
+    throw new Error('Password must be at least 6 characters.')
+  }
+  if (!birthday) {
+    throw new Error('Birthday is required.')
+  }
+  if (!height || !weight) {
+    throw new Error('Height and weight must be valid numbers.')
+  }
+
+  return {
+    account,
+    accountKey,
+    email,
+    name,
+    password,
+    sex,
+    birthday,
+    height,
+    weight,
+    avatar
+  }
+}
+
+function buildLocalSessionUser(user, localAccount = null) {
+  if (!user) return null
+  const account = localAccount?.account || user.username || user.email || ''
+  return {
+    id: user.id,
+    sub: `${user.provider}:${user.providerId}`,
+    email: user.email || null,
+    name: user.name || null,
+    provider: user.provider,
+    username: user.username || null,
+    account,
+    avatar: user.avatar || null,
+    sex: user.sex || null,
+    birthday: toIsoString(user.birthday),
+    height: user.heightCm ?? null,
+    weight: user.weightKg ?? null,
+    onboardingCompleted: !!user.onboardingCompleted,
+    onboardingAnswers: user.onboardingAnswers ?? null
+  }
+}
+
+async function findLegacyLocalAccountByIdentifier(identifier) {
+  const lookup = normalizeAccountKey(identifier)
+  if (!lookup) return null
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      select
+        a.id::text as credential_id,
+        a.account,
+        a.account_key,
+        a.email,
+        a.password_hash,
+        a.password_salt,
+        u.id as user_id,
+        u.provider,
+        u."providerId" as provider_id,
+        u.email as user_email,
+        u.name,
+        u.username,
+        u.avatar,
+        u.sex,
+        u.birthday,
+        u."heightCm" as height_cm,
+        u."weightKg" as weight_kg,
+        u."onboardingCompleted" as onboarding_completed,
+        u."onboardingAnswers" as onboarding_answers
+      from public.legacy_local_auth_accounts a
+      join public."User" u on u.id = a.user_id
+      where a.account_key = $1
+         or lower(coalesce(a.email, '')) = $1
+      limit 1
+    `,
+    lookup
+  )
+
+  return rows?.[0] || null
+}
+
+async function localAccountExists({ accountKey, email }) {
+  const rawAccount = normalizeLocalAccount(accountKey)
+  const normalizedAccountKey = normalizeAccountKey(accountKey)
+  const normalizedEmail = normalizeOptionalEmail(email)
+  const localRows = await prisma.$queryRawUnsafe(
+    `
+      select id::text as id
+      from public.legacy_local_auth_accounts
+      where account_key = $1
+         or ($2::text is not null and lower(coalesce(email, '')) = $2)
+      limit 1
+    `,
+    normalizedAccountKey,
+    normalizedEmail
+  )
+  if (localRows?.length) return true
+
+  const existingRows = await prisma.$queryRawUnsafe(
+    `
+      select id
+      from public."User"
+      where ($1::text is not null and lower(coalesce(email, '')) = $1)
+         or ($2::text is not null and lower(coalesce(username, '')) = lower($2))
+      limit 1
+    `,
+    normalizedEmail,
+    EMAIL_PATTERN.test(rawAccount) ? null : rawAccount
+  )
+  return !!existingRows?.length
+}
+
+async function loadLatestVerification(accountKey) {
+  const normalizedAccountKey = normalizeAccountKey(accountKey)
+  if (!normalizedAccountKey) return null
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      select *
+      from public.legacy_local_auth_verifications
+      where account_key = $1
+        and consumed_at is null
+      order by created_at desc
+      limit 1
+    `,
+    normalizedAccountKey
+  )
+  return rows?.[0] || null
+}
+
+async function resolveClientStateIdentity(req) {
+  const accessToken = getBearerToken(req)
+  if (accessToken) {
+    const authUser = await getSupabaseAuthUser(accessToken)
+    return {
+      type: 'supabase',
+      serverUserId: null,
+      supabaseUserId: String(authUser.id || ''),
+      accountLabel: authUser.email || 'Connected account'
+    }
+  }
+
+  const sessionUser = getSessionUserFromRequest(req)
+  if (sessionUser?.id) {
+    return {
+      type: 'server',
+      serverUserId: Number(sessionUser.id),
+      supabaseUserId: null,
+      accountLabel: sessionUser.email || sessionUser.username || sessionUser.name || 'Current user'
+    }
+  }
+
+  const error = new Error('No authenticated account session was found.')
+  error.statusCode = 401
+  throw error
+}
+
+async function findClientStateEntries({ identity, scope, deviceId = null, keys = [] }) {
+  const scopeValue = scope === 'user' ? 'user' : 'device'
+  const normalizedDeviceId = scopeValue === 'device' ? String(deviceId || '').trim() : null
+  const normalizedKeys = keys.map((item) => String(item || '').trim()).filter(Boolean)
+
+  let query = `
+    select state_key, state_value, scope, device_id, updated_at
+    from public.user_client_state
+    where scope = $1
+  `
+  const params = [scopeValue]
+  let nextIndex = 2
+
+  if (identity.type === 'server') {
+    query += ` and server_user_id = $${nextIndex}`
+    params.push(identity.serverUserId)
+    nextIndex += 1
+  } else {
+    query += ` and supabase_user_id = $${nextIndex}::uuid`
+    params.push(identity.supabaseUserId)
+    nextIndex += 1
+  }
+
+  if (scopeValue === 'device') {
+    query += ` and device_id = $${nextIndex}`
+    params.push(normalizedDeviceId)
+    nextIndex += 1
+  }
+
+  if (normalizedKeys.length) {
+    query += ` and state_key = any($${nextIndex}::text[])`
+    params.push(normalizedKeys)
+    nextIndex += 1
+  }
+
+  query += ' order by updated_at desc'
+  return prisma.$queryRawUnsafe(query, ...params)
+}
+
+async function upsertClientStateEntry(identity, entry) {
+  const scopeValue = entry.scope === 'user' ? 'user' : 'device'
+  const deviceId = scopeValue === 'device' ? String(entry.deviceId || '').trim() : null
+  const stateKey = String(entry.stateKey || '').trim()
+  const stateValue = entry.stateValue ?? null
+
+  if (!stateKey) {
+    throw new Error('State key is required.')
+  }
+  if (scopeValue === 'device' && !deviceId) {
+    throw new Error('Device id is required for device-scoped state.')
+  }
+
+  let selectQuery = `
+    select id::text as id
+    from public.user_client_state
+    where scope = $1
+      and state_key = $2
+  `
+  const selectParams = [scopeValue, stateKey]
+  let nextIndex = 3
+
+  if (identity.type === 'server') {
+    selectQuery += ` and server_user_id = $${nextIndex}`
+    selectParams.push(identity.serverUserId)
+    nextIndex += 1
+  } else {
+    selectQuery += ` and supabase_user_id = $${nextIndex}::uuid`
+    selectParams.push(identity.supabaseUserId)
+    nextIndex += 1
+  }
+
+  if (scopeValue === 'device') {
+    selectQuery += ` and device_id = $${nextIndex}`
+    selectParams.push(deviceId)
+  }
+
+  const existingRows = await prisma.$queryRawUnsafe(selectQuery, ...selectParams)
+  const existingId = existingRows?.[0]?.id || ''
+
+  if (existingId) {
+    const updatedRows = await prisma.$queryRawUnsafe(
+      `
+        update public.user_client_state
+        set state_value = $2::jsonb,
+            updated_at = now()
+        where id = $1::uuid
+        returning state_key, state_value, scope, device_id, updated_at
+      `,
+      existingId,
+      JSON.stringify(stateValue)
+    )
+    return updatedRows?.[0] || null
+  }
+
+  const insertedRows = await prisma.$queryRawUnsafe(
+    `
+      insert into public.user_client_state
+        (server_user_id, supabase_user_id, scope, device_id, state_key, state_value)
+      values
+        ($1, $2::uuid, $3, $4, $5, $6::jsonb)
+      returning state_key, state_value, scope, device_id, updated_at
+    `,
+    identity.type === 'server' ? identity.serverUserId : null,
+    identity.type === 'supabase' ? identity.supabaseUserId : null,
+    scopeValue,
+    deviceId,
+    stateKey,
+    JSON.stringify(stateValue)
+  )
+
+  return insertedRows?.[0] || null
+}
+
+async function hydrateServerUserPayloadFromSession(decoded) {
+  if (!decoded?.id) return null
+  const user = await findUserById(Number(decoded.id))
+  if (!user) return null
+  let localAccount = null
+  if (user.provider === 'local') {
+    const account = await prisma.$queryRawUnsafe(
+      `
+        select account, account_key, email
+        from public.legacy_local_auth_accounts
+        where user_id = $1
+        limit 1
+      `,
+      user.id
+    )
+    localAccount = account?.[0] || null
+  }
+  return buildLocalSessionUser(user, localAccount)
+}
 
 function resolveRedirectTarget(raw) {
   if (!raw || typeof raw !== 'string') return null
@@ -402,6 +775,148 @@ function requireAuth(req, res, next) {
     return next()
   } catch (err) {
     return res.status(401).json({ error: 'Session invalid' })
+  }
+}
+
+function getBearerToken(req) {
+  const authHeader = String(req.headers.authorization || '')
+  if (!authHeader.toLowerCase().startsWith('bearer ')) return ''
+  return authHeader.slice(7).trim()
+}
+
+function getSessionUserFromRequest(req) {
+  const token = req.cookies.session
+  if (!token) return null
+  try {
+    return jwt.verify(token, JWT_SECRET)
+  } catch {
+    return null
+  }
+}
+
+async function getSupabaseAuthUser(accessToken) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Supabase admin environment variables are missing on the server.')
+  }
+  if (!accessToken) {
+    const error = new Error('Missing Supabase access token.')
+    error.statusCode = 401
+    throw error
+  }
+
+  const response = await fetchWithTimeout(
+    `${SUPABASE_URL}/auth/v1/user`,
+    {
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${accessToken}`
+      }
+    },
+    15000,
+    'Supabase user lookup'
+  )
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || !payload?.id) {
+    const error = new Error(payload?.msg || payload?.error_description || payload?.error || 'Supabase session is invalid.')
+    error.statusCode = response.status || 401
+    throw error
+  }
+  return payload
+}
+
+async function deleteServerSideAccountData({ userId = null, email = '' } = {}) {
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  let existingUser = null
+
+  if (userId) {
+    existingUser = await prisma.user.findUnique({
+      where: {
+        id: userId
+      }
+    })
+  }
+
+  if (!existingUser && normalizedEmail) {
+    existingUser = await prisma.user.findFirst({
+      where: {
+        email: normalizedEmail
+      }
+    })
+  }
+
+  if (!existingUser) return
+  await prisma.user.delete({
+    where: {
+      id: existingUser.id
+    }
+  })
+}
+
+function isMissingRelationError(error) {
+  const message = String(error?.message || '')
+  return /relation .* does not exist/i.test(message) || /42P01/.test(message)
+}
+
+async function deleteSupabaseBusinessData(userId) {
+  if (!userId) return
+  const cleanupQueries = [
+    'DELETE FROM public.user_onboarding_answers WHERE user_id = $1::uuid',
+    'DELETE FROM public.user_profiles WHERE user_id = $1::uuid',
+    'DELETE FROM public.user_app_settings WHERE user_id = $1::uuid',
+    'DELETE FROM public.user_client_state WHERE supabase_user_id = $1::uuid',
+    'DELETE FROM public.user_nutrition_goals WHERE user_id = $1::uuid',
+    'DELETE FROM public.meal_entries WHERE user_id = $1::uuid',
+    'DELETE FROM public.water_entries WHERE user_id = $1::uuid',
+    'DELETE FROM public.user_plans WHERE user_id = $1::uuid',
+    'DELETE FROM public.workout_entries WHERE user_id = $1::uuid',
+    'DELETE FROM public.rest_day_entries WHERE user_id = $1::uuid'
+  ]
+
+  for (const query of cleanupQueries) {
+    try {
+      await prisma.$executeRawUnsafe(query, userId)
+    } catch (error) {
+      if (isMissingRelationError(error)) continue
+      throw error
+    }
+  }
+}
+
+async function lookupSupabaseAuthUserIdByEmail(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  if (!normalizedEmail) return ''
+
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      'SELECT id::text AS id FROM auth.users WHERE lower(email) = $1 LIMIT 1',
+      normalizedEmail
+    )
+    return rows?.[0]?.id || ''
+  } catch (error) {
+    if (isMissingRelationError(error)) return ''
+    throw error
+  }
+}
+
+async function deleteSupabaseAuthUser(userId) {
+  if (!userId) return
+  const response = await fetchWithTimeout(
+    `${SUPABASE_URL}/auth/v1/admin/users/${userId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+      }
+    },
+    15000,
+    'Supabase auth delete'
+  )
+
+  if (response.status === 404) return
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.msg || payload?.error || 'Failed to delete auth user.')
   }
 }
 
@@ -1120,6 +1635,234 @@ async function findOrCreateUser(profile) {
   return { user: createdUser, created: true }
 }
 
+app.post('/auth/local/send-verification', async (req, res) => {
+  try {
+    const normalized = normalizeLocalRegistrationPayload(req.body || {})
+    const alreadyExists = await localAccountExists({
+      accountKey: normalized.accountKey,
+      email: normalized.email
+    })
+    if (alreadyExists) {
+      return res.status(409).json({ error: 'This account or email is already registered.' })
+    }
+
+    const verificationCode = createVerificationCode()
+    const verificationCodeHash = hashVerificationCode(verificationCode)
+    const passwordSecret = await hashPasswordSecret(normalized.password)
+    const expiresAt = new Date(Date.now() + LEGACY_VERIFICATION_TTL_MS)
+
+    await prisma.$executeRawUnsafe(
+      `
+        delete from public.legacy_local_auth_verifications
+        where account_key = $1
+      `,
+      normalized.accountKey
+    )
+
+    const registrationPayload = {
+      account: normalized.account,
+      accountKey: normalized.accountKey,
+      email: normalized.email,
+      name: normalized.name,
+      sex: normalized.sex,
+      birthday: normalized.birthday,
+      height: normalized.height,
+      weight: normalized.weight,
+      avatar: normalized.avatar
+    }
+
+    await prisma.$executeRawUnsafe(
+      `
+        insert into public.legacy_local_auth_verifications
+          (account, account_key, email, verification_code_hash, password_hash, password_salt, registration_payload, expires_at)
+        values
+          ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz)
+      `,
+      normalized.account,
+      normalized.accountKey,
+      normalized.email,
+      verificationCodeHash,
+      passwordSecret.hash,
+      passwordSecret.salt,
+      JSON.stringify(registrationPayload),
+      expiresAt.toISOString()
+    )
+
+    return res.json({
+      ok: true,
+      deliveryTarget: normalized.email || normalized.account,
+      expiresIn: Math.floor(LEGACY_VERIFICATION_TTL_MS / 1000),
+      debugCode: process.env.NODE_ENV === 'production' ? undefined : verificationCode,
+      notice:
+        process.env.NODE_ENV === 'production'
+          ? 'Verification code generated.'
+          : 'Verification code generated in cloud state. Local development returns the code directly.'
+    })
+  } catch (err) {
+    console.error('Local verification send failed', err)
+    return res.status(400).json({ error: err?.message || 'Failed to create verification state.' })
+  }
+})
+
+app.post('/auth/local/confirm-registration', async (req, res) => {
+  try {
+    const account = normalizeLocalAccount(req.body?.account)
+    const accountKey = normalizeAccountKey(account)
+    const code = String(req.body?.code || '').trim()
+
+    if (!accountKey || !code) {
+      return res.status(400).json({ error: 'Account and verification code are required.' })
+    }
+
+    const verification = await loadLatestVerification(accountKey)
+    if (!verification) {
+      return res.status(404).json({ error: 'No verification request was found for this account.' })
+    }
+    if (verification.consumed_at) {
+      return res.status(400).json({ error: 'This verification code has already been used.' })
+    }
+    if (new Date(verification.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: 'Verification code expired. Please resend.' })
+    }
+    if (hashVerificationCode(code) !== String(verification.verification_code_hash || '')) {
+      return res.status(400).json({ error: 'Incorrect verification code.' })
+    }
+
+    const payload = verification.registration_payload && typeof verification.registration_payload === 'object'
+      ? verification.registration_payload
+      : {}
+    const email = normalizeOptionalEmail(payload.email)
+    const accountLabel = normalizeLocalAccount(payload.account) || account
+    const username = EMAIL_PATTERN.test(accountLabel) ? null : accountLabel
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          ...(email ? [{ email }] : []),
+          ...(username ? [{ username }] : [])
+        ]
+      }
+    })
+    if (existingUser) {
+      return res.status(409).json({ error: 'This account or email is already registered.' })
+    }
+
+    const createdUser = await prisma.user.create({
+      data: {
+        provider: 'local',
+        providerId: accountKey,
+        email,
+        name: normalizeOptionalText(payload.name),
+        username,
+        avatar: normalizeOptionalText(payload.avatar),
+        sex: String(payload.sex || '').trim().toLowerCase() === 'male' ? 'male' : 'female',
+        birthday: payload.birthday ? new Date(payload.birthday) : null,
+        heightCm: normalizeNumber(payload.height),
+        weightKg: normalizeNumber(payload.weight),
+        onboardingCompleted: false,
+        onboardingAnswers: null
+      }
+    })
+
+    await prisma.$executeRawUnsafe(
+      `
+        insert into public.legacy_local_auth_accounts
+          (user_id, account, account_key, email, password_hash, password_salt)
+        values
+          ($1, $2, $3, $4, $5, $6)
+      `,
+      createdUser.id,
+      accountLabel,
+      accountKey,
+      email,
+      String(verification.password_hash || ''),
+      String(verification.password_salt || '')
+    )
+
+    await prisma.$executeRawUnsafe(
+      `
+        update public.legacy_local_auth_verifications
+        set consumed_at = now(),
+            updated_at = now()
+        where id = $1::uuid
+      `,
+      String(verification.id)
+    )
+
+    const sessionUser = buildLocalSessionUser(createdUser, {
+      account: accountLabel,
+      email
+    })
+    const session = issueSession(sessionUser)
+    setSessionCookie(res, session)
+
+    return res.json({
+      ok: true,
+      user: sessionUser
+    })
+  } catch (err) {
+    console.error('Local registration confirm failed', err)
+    return res.status(500).json({ error: err?.message || 'Failed to complete registration.' })
+  }
+})
+
+app.post('/auth/local/login', async (req, res) => {
+  try {
+    const identifier = normalizeLocalAccount(req.body?.identifier)
+    const password = String(req.body?.password || '')
+
+    if (!identifier || !password) {
+      return res.status(400).json({ error: 'Account and password are required.' })
+    }
+
+    const accountRow = await findLegacyLocalAccountByIdentifier(identifier)
+    if (!accountRow) {
+      return res.status(401).json({ error: 'Incorrect account or password.' })
+    }
+
+    const verified = await verifyPasswordSecret(
+      password,
+      String(accountRow.password_salt || ''),
+      String(accountRow.password_hash || '')
+    )
+    if (!verified) {
+      return res.status(401).json({ error: 'Incorrect account or password.' })
+    }
+
+    const sessionUser = buildLocalSessionUser(
+      {
+        id: Number(accountRow.user_id),
+        provider: String(accountRow.provider || 'local'),
+        providerId: String(accountRow.provider_id || accountRow.account_key || ''),
+        email: accountRow.user_email || accountRow.email || null,
+        name: accountRow.name || null,
+        username: accountRow.username || null,
+        avatar: accountRow.avatar || null,
+        sex: accountRow.sex || null,
+        birthday: accountRow.birthday || null,
+        heightCm: accountRow.height_cm ?? null,
+        weightKg: accountRow.weight_kg ?? null,
+        onboardingCompleted: !!accountRow.onboarding_completed,
+        onboardingAnswers: accountRow.onboarding_answers ?? null
+      },
+      {
+        account: accountRow.account,
+        email: accountRow.email
+      }
+    )
+
+    const session = issueSession(sessionUser)
+    setSessionCookie(res, session)
+
+    return res.json({
+      ok: true,
+      user: sessionUser
+    })
+  } catch (err) {
+    console.error('Local auth login failed', err)
+    return res.status(500).json({ error: err?.message || 'Failed to log in.' })
+  }
+})
+
 // Start Google OAuth flow
 app.get('/auth/google', (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
@@ -1265,12 +2008,13 @@ app.post('/auth/apple/callback', async (req, res) => {
 })
 
 // Session probe
-app.get('/me', (req, res) => {
+app.get('/me', async (req, res) => {
   const token = req.cookies.session
   if (!token) return res.status(401).json({ error: 'No session' })
   try {
     const decoded = jwt.verify(token, JWT_SECRET)
-    res.json({ ok: true, user: decoded })
+    const payload = await hydrateServerUserPayloadFromSession(decoded)
+    res.json({ ok: true, user: payload || decoded })
   } catch (err) {
     res.status(401).json({ error: 'Session invalid' })
   }
@@ -1279,6 +2023,119 @@ app.get('/me', (req, res) => {
 app.post('/logout', (req, res) => {
   clearSessionCookie(res)
   res.json({ ok: true })
+})
+
+app.get('/api/user/client-state', async (req, res) => {
+  try {
+    const identity = await resolveClientStateIdentity(req)
+    const scope = req.query.scope === 'user' ? 'user' : 'device'
+    const deviceId = scope === 'device' ? String(req.query.deviceId || '').trim() : null
+    const keys = String(req.query.keys || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    const rows = await findClientStateEntries({
+      identity,
+      scope,
+      deviceId,
+      keys
+    })
+    res.json({
+      ok: true,
+      entries: Array.isArray(rows)
+        ? rows.map((row) => ({
+            scope: row.scope,
+            deviceId: row.device_id || null,
+            stateKey: row.state_key,
+            stateValue: row.state_value ?? null,
+            updatedAt: row.updated_at || null
+          }))
+        : []
+    })
+  } catch (err) {
+    const statusCode = Number(err?.statusCode) || 500
+    res.status(statusCode).json({ error: err?.message || 'Failed to load client state.' })
+  }
+})
+
+app.post('/api/user/client-state', async (req, res) => {
+  try {
+    const identity = await resolveClientStateIdentity(req)
+    const entries = Array.isArray(req.body?.entries) ? req.body.entries : []
+    if (!entries.length) {
+      return res.status(400).json({ error: 'At least one state entry is required.' })
+    }
+
+    const savedEntries = []
+    for (const entry of entries) {
+      const saved = await upsertClientStateEntry(identity, entry)
+      if (saved) {
+        savedEntries.push({
+          scope: saved.scope,
+          deviceId: saved.device_id || null,
+          stateKey: saved.state_key,
+          stateValue: saved.state_value ?? null,
+          updatedAt: saved.updated_at || null
+        })
+      }
+    }
+
+    res.json({
+      ok: true,
+      entries: savedEntries
+    })
+  } catch (err) {
+    console.error('Client state save failed', err)
+    const statusCode = Number(err?.statusCode) || 500
+    res.status(statusCode).json({ error: err?.message || 'Failed to save client state.' })
+  }
+})
+
+app.post('/api/account/delete', async (req, res) => {
+  try {
+    const confirmation = String(req.body?.confirmation || '').trim()
+    const enteredEmail = String(req.body?.email || '').trim().toLowerCase()
+    if (confirmation !== 'DELETE') {
+      return res.status(400).json({ error: 'Confirmation must equal DELETE.' })
+    }
+    if (!enteredEmail) {
+      return res.status(400).json({ error: 'Account email is required for deletion verification.' })
+    }
+
+    const accessToken = getBearerToken(req)
+    const sessionUser = getSessionUserFromRequest(req)
+    let supabaseUserId = ''
+    let email = String(sessionUser?.email || '').trim().toLowerCase()
+
+    if (accessToken) {
+      const authUser = await getSupabaseAuthUser(accessToken)
+      supabaseUserId = authUser.id || ''
+      email = String(authUser.email || email).trim().toLowerCase()
+    } else if (!sessionUser) {
+      return res.status(401).json({ error: 'No authenticated account session was found.' })
+    }
+
+    if (!supabaseUserId && email) {
+      supabaseUserId = await lookupSupabaseAuthUserIdByEmail(email)
+    }
+    if (!email || enteredEmail !== email) {
+      return res.status(400).json({ error: 'Entered email does not match the current account.' })
+    }
+
+    await deleteSupabaseBusinessData(supabaseUserId)
+    await deleteServerSideAccountData({
+      userId: sessionUser?.id || null,
+      email
+    })
+    await deleteSupabaseAuthUser(supabaseUserId)
+
+    clearSessionCookie(res)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('Account delete error', err)
+    const statusCode = Number(err?.statusCode) || 500
+    res.status(statusCode).json({ error: err?.message || 'Failed to delete account.' })
+  }
 })
 
 // Update profile after social sign-in

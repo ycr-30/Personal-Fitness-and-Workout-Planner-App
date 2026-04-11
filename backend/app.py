@@ -13,8 +13,13 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=BASE_DIR / ".env", override=True)
 
 from agents.model_manager import manager
-from agents.nutrition_agent import answer as nutrition_answer
-from agents.router import route
+from agents.nutrition_agent import (
+    answer as nutrition_answer,
+    answer_card_pack as nutrition_card_pack,
+    answer_food_estimate as nutrition_food_estimate,
+    answer_target_pack as nutrition_target_pack,
+)
+from agents.router import route, scoped_message
 from agents.workout_agent import answer as workout_answer
 
 app = FastAPI(title="KeepFit Multi-Agent API", version="0.1.0")
@@ -31,6 +36,35 @@ class ChatReq(BaseModel):
     user: dict[str, Any] | None = None
     ragContext: str | None = None
     sources: list[dict[str, Any]] | None = None
+
+
+class NutritionCardsReq(BaseModel):
+    selected_date: str | None = None
+    goal_type: str | None = None
+    active_meal_type: str | None = None
+    summary: dict[str, Any] | None = None
+    trends: list[dict[str, Any]] | None = None
+    user_profile: dict[str, Any] | None = None
+    use_rag: bool = False
+
+
+class NutritionTargetsReq(BaseModel):
+    goal_type: str | None = None
+    plan_goal_label: str | None = None
+    nutrition_summary: dict[str, Any] | None = None
+    workout_context: dict[str, Any] | None = None
+    user_profile: dict[str, Any] | None = None
+    use_rag: bool = False
+
+
+class NutritionFoodEstimateReq(BaseModel):
+    food_name: str | None = None
+    brand_or_note: str | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    meal_type: str | None = None
+    user_profile: dict[str, Any] | None = None
+    use_rag: bool = False
 
 
 def _parse_cors_origins() -> list[str]:
@@ -154,13 +188,13 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
         return response
 
     out_w, ev_w = workout_answer(
-        message,
+        scoped_message(message, "workout"),
         user_profile=profile,
         use_rag=req.use_rag,
         external_evidence=external_evidence,
     )
     out_n, ev_n = nutrition_answer(
-        message,
+        scoped_message(message, "nutrition"),
         user_profile=profile,
         use_rag=req.use_rag,
         external_evidence=external_evidence,
@@ -176,3 +210,97 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
     }
     response["content"] = merged
     return response
+
+
+@app.post("/nutrition/cards")
+def nutrition_cards(req: NutritionCardsReq, authorization: str | None = Header(default=None)):
+    inbound_api_key = os.getenv("INBOUND_API_KEY", "").strip()
+    if inbound_api_key:
+        expected = f"Bearer {inbound_api_key}"
+        if authorization != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    context = {
+        "selected_date": req.selected_date,
+        "goal_type": req.goal_type,
+        "active_meal_type": req.active_meal_type,
+        "summary": req.summary or {},
+        "trends": req.trends or [],
+    }
+    content, evidence = nutrition_card_pack(
+        context,
+        user_profile=req.user_profile,
+        use_rag=req.use_rag,
+        external_evidence=[],
+    )
+    return {
+        "route": "nutrition_cards",
+        "insight": content.get("insight", []),
+        "recommendation": content.get("recommendation", []),
+        "evidence": evidence,
+    }
+
+
+@app.post("/nutrition/targets")
+def nutrition_targets(req: NutritionTargetsReq, authorization: str | None = Header(default=None)):
+    inbound_api_key = os.getenv("INBOUND_API_KEY", "").strip()
+    if inbound_api_key:
+        expected = f"Bearer {inbound_api_key}"
+        if authorization != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    context = {
+        "goal_type": req.goal_type,
+        "plan_goal_label": req.plan_goal_label,
+        "nutrition_summary": req.nutrition_summary or {},
+        "workout_context": req.workout_context or {},
+    }
+    content, evidence = nutrition_target_pack(
+        context,
+        user_profile=req.user_profile,
+        use_rag=req.use_rag,
+        external_evidence=[],
+    )
+    return {
+        "route": "nutrition_targets",
+        "calories_target": content.get("calories_target", 0),
+        "protein_target_g": content.get("protein_target_g", 0),
+        "carbs_target_g": content.get("carbs_target_g", 0),
+        "fat_target_g": content.get("fat_target_g", 0),
+        "explanation": content.get("explanation", ""),
+        "source": content.get("source", "fallback"),
+        "evidence": evidence,
+    }
+
+
+@app.post("/nutrition/estimate-food")
+def nutrition_estimate_food(req: NutritionFoodEstimateReq, authorization: str | None = Header(default=None)):
+    inbound_api_key = os.getenv("INBOUND_API_KEY", "").strip()
+    if inbound_api_key:
+        expected = f"Bearer {inbound_api_key}"
+        if authorization != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    context = {
+        "food_name": req.food_name,
+        "brand_or_note": req.brand_or_note,
+        "quantity": req.quantity,
+        "unit": req.unit,
+        "meal_type": req.meal_type,
+    }
+    content, evidence = nutrition_food_estimate(
+        context,
+        user_profile=req.user_profile,
+        use_rag=req.use_rag,
+        external_evidence=[],
+    )
+    return {
+        "route": "nutrition_estimate_food",
+        "calories": content.get("calories", 0),
+        "protein_g": content.get("protein_g", 0),
+        "carbs_g": content.get("carbs_g", 0),
+        "fat_g": content.get("fat_g", 0),
+        "explanation": content.get("explanation", ""),
+        "source": content.get("source", "fallback"),
+        "evidence": evidence,
+    }

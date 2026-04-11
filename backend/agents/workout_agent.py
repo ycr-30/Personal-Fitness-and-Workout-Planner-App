@@ -9,6 +9,12 @@ from .rag import retrieve
 PLACEHOLDER_RE = re.compile(r"<[^>\n]{1,80}>|\{\{[^}\n]{1,80}\}\}|\[[A-Za-z_ ]{1,40}\]")
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_WORD_RE = re.compile(r"\b[A-Za-z]{3,}\b")
+NUTRITION_LEAK_RE = re.compile(
+    r"\b(?:calories?|kcal|protein|carbs?|fat|meal(?:s)?|diet(?:ary)?|breakfast|lunch|dinner|snack|"
+    r"food(?:s)?|macros?|portion|intake)\b|"
+    r"(?:热量|卡路里|蛋白|碳水|脂肪|饮食|早餐|午餐|晚餐|零食|食物)",
+    re.I,
+)
 
 
 def _contains_cjk(text: str) -> bool:
@@ -35,11 +41,23 @@ def _needs_rewrite(user_message: str, answer: str) -> bool:
         return True
     if not _is_cjk_user_message(user_message) and _contains_cjk(text):
         return True
+    if NUTRITION_LEAK_RE.search(text):
+        return True
     return False
 
 
 def _fallback_clean(text: str) -> str:
     return PLACEHOLDER_RE.sub("（请补充具体信息）", text or "")
+
+
+def _strip_nutrition_leak(text: str) -> str:
+    kept_lines = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if line and NUTRITION_LEAK_RE.search(line):
+            continue
+        kept_lines.append(raw_line)
+    return "\n".join(kept_lines)
 
 
 def _rewrite_answer(user_message: str, draft_answer: str) -> str:
@@ -48,11 +66,23 @@ def _rewrite_answer(user_message: str, draft_answer: str) -> str:
         "Rewrite the draft answer so it is directly usable.\n"
         "Rules:\n"
         f"- Output only in {target_language}.\n"
+        "- Answer ONLY the workout and exercise part of the request.\n"
+        "- Do NOT include calories, protein targets, meal plans, food examples, or dietary suggestions.\n"
+        "- Give exactly ONE best-fit plan unless the user explicitly asked for alternatives.\n"
+        "- Use the user details already provided instead of replacing them with generic advice.\n"
+        "- If information is missing, make only ONE conservative assumption and state it briefly.\n"
+        "- Use exactly four sections with these meanings, translated into the target language:\n"
+        "  1) Goal and assumptions\n"
+        "  2) Training plan\n"
+        "  3) Progression rule\n"
+        "  4) Safety and recovery\n"
+        "- In the training plan, include specific sets, reps, and rest when relevant.\n"
+        "- Use normal prose unless the user explicitly asked for a table. If they did, use a clean GitHub-flavored Markdown table.\n"
         "- Do not mix languages in the same answer.\n"
         "- Do NOT output placeholders such as <...>, [X], {{...}}, TBD, N/A, null.\n"
         "- Do NOT output JSON.\n"
         "- Keep advice concrete and actionable.\n"
-        "- Ask at most ONE concise follow-up question only if critical info is missing.\n\n"
+        "- Ask at most ONE concise follow-up question only if critical info is missing and the answer would otherwise be unsafe or unusable.\n\n"
         f"Original user question:\n{user_message}\n\n"
         f"Draft answer:\n{draft_answer}"
     )
@@ -126,5 +156,5 @@ def answer(
         rewritten = _rewrite_answer(message, out).strip()
         if rewritten:
             out = rewritten
-    out = _fallback_clean(out).strip()
+    out = _strip_nutrition_leak(_fallback_clean(out)).strip()
     return out, evidence

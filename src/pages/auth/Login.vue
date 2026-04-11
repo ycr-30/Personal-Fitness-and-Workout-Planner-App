@@ -189,6 +189,7 @@ import { reactive, computed, watch, ref, onBeforeUnmount } from 'vue' // 引入�
 import { useRouter, useRoute } from 'vue-router' // 引入路由实例
 import { useAuthStore } from '@/stores/auth' // 引入鉴权仓库
 import { supabase } from '@/lib/supabaseClient'
+import { getStableDeviceId, saveCloudClientState } from '@/lib/cloudClientState'
 
 const router = useRouter() // 获取路由实例
 const route = useRoute() // 获取当前路由
@@ -405,9 +406,35 @@ async function confirmOtp() {
       return
     }
     await auth.setUserFromSupabase(data.user)
+    await syncLoginPreferencesToCloud(otp.email)
     router.push('/onboarding')
   } finally {
     otp.loading = false
+  }
+}
+
+async function syncLoginPreferencesToCloud(identifier) {
+  try {
+    await saveCloudClientState([
+      {
+        scope: 'device',
+        deviceId: getStableDeviceId(),
+        stateKey: 'remember_me',
+        stateValue: {
+          enabled: !!form.remember
+        }
+      },
+      {
+        scope: 'device',
+        deviceId: getStableDeviceId(),
+        stateKey: 'last_identifier',
+        stateValue: {
+          value: form.remember ? String(identifier || '').trim() : ''
+        }
+      }
+    ])
+  } catch (error) {
+    console.error('Failed to save login preferences to cloud', error)
   }
 }
 
@@ -427,6 +454,7 @@ async function onSubmit() {
   }
   attempts.value = 0
   resetHint.value = false
+  await syncLoginPreferencesToCloud(form.account)
   welcomeOverlay.value = true
   await new Promise((resolve) => setTimeout(resolve, 1000))
   if (auth.user?.onboarding?.completed) {

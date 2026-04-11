@@ -63,11 +63,14 @@
       </form>
 
       <button
+        v-for="handle in resizeHandles"
+        :key="handle.direction"
         class="resize-handle"
+        :class="`handle-${handle.direction}`"
         type="button"
-        aria-label="Resize chat window"
-        @pointerdown="onResizePointerDown"
-      />
+        :aria-label="handle.label"
+        @pointerdown="onResizePointerDown($event, handle.direction)"
+      ></button>
     </section>
   </div>
 </template>
@@ -75,16 +78,27 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { getStableDeviceId, loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
 
 const auth = useAuthStore()
 const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
-const BUBBLE_SIZE = 58
-const BUBBLE_PADDING = 10
+const BUBBLE_SIZE = 50
+const BUBBLE_PADDING = 8
 const PANEL_MIN_WIDTH = 300
 const PANEL_MIN_HEIGHT = 360
 const PANEL_DEFAULT_WIDTH = 380
 const PANEL_DEFAULT_HEIGHT = 560
 const PANEL_PADDING = 12
+const resizeHandles = [
+  { direction: 'n', label: 'Resize from top edge' },
+  { direction: 's', label: 'Resize from bottom edge' },
+  { direction: 'e', label: 'Resize from right edge' },
+  { direction: 'w', label: 'Resize from left edge' },
+  { direction: 'ne', label: 'Resize from top-right corner' },
+  { direction: 'nw', label: 'Resize from top-left corner' },
+  { direction: 'se', label: 'Resize from bottom-right corner' },
+  { direction: 'sw', label: 'Resize from bottom-left corner' }
+]
 
 const isOpen = ref(false)
 const loading = ref(false)
@@ -128,8 +142,8 @@ const panelStorageKey = computed(() => {
 
 function defaultBubblePosition() {
   return {
-    x: Math.max(BUBBLE_PADDING, viewport.value.width - BUBBLE_SIZE - 24),
-    y: Math.max(BUBBLE_PADDING, viewport.value.height - BUBBLE_SIZE - 24)
+    x: Math.max(BUBBLE_PADDING, viewport.value.width - BUBBLE_SIZE - 16),
+    y: Math.max(BUBBLE_PADDING, viewport.value.height - BUBBLE_SIZE - 16)
   }
 }
 
@@ -205,6 +219,14 @@ function readStoredPanelState() {
 function saveBubblePosition() {
   if (typeof window === 'undefined') return
   localStorage.setItem(bubbleStorageKey.value, JSON.stringify(bubblePosition.value))
+  saveCloudClientState({
+    scope: 'device',
+    deviceId: getStableDeviceId(),
+    stateKey: 'chat_bubble_position',
+    stateValue: bubblePosition.value
+  }).catch((error) => {
+    console.error('Failed to save bubble position to cloud', error)
+  })
 }
 
 function savePanelState() {
@@ -216,6 +238,17 @@ function savePanelState() {
       size: panelSize.value
     })
   )
+  saveCloudClientState({
+    scope: 'device',
+    deviceId: getStableDeviceId(),
+    stateKey: 'chat_panel_state',
+    stateValue: {
+      position: panelPosition.value,
+      size: panelSize.value
+    }
+  }).catch((error) => {
+    console.error('Failed to save panel state to cloud', error)
+  })
 }
 
 function resetBubblePosition() {
@@ -229,6 +262,38 @@ function resetPanelState() {
   const size = clampPanelSize(stored?.size || defaultPanelSize())
   panelSize.value = size
   panelPosition.value = clampPanelPosition(stored?.position || defaultPanelPosition(), size)
+}
+
+async function hydrateCloudChatState() {
+  try {
+    const state = await loadCloudClientState({
+      scope: 'device',
+      deviceId: getStableDeviceId(),
+      keys: ['chat_bubble_position', 'chat_panel_state']
+    })
+
+    const bubble = state?.chat_bubble_position
+    if (bubble && typeof bubble === 'object') {
+      bubblePosition.value = clampBubblePosition(bubble)
+      localStorage.setItem(bubbleStorageKey.value, JSON.stringify(bubblePosition.value))
+    }
+
+    const panel = state?.chat_panel_state
+    if (panel && typeof panel === 'object') {
+      const size = clampPanelSize(panel?.size || defaultPanelSize())
+      panelSize.value = size
+      panelPosition.value = clampPanelPosition(panel?.position || defaultPanelPosition(), size)
+      localStorage.setItem(
+        panelStorageKey.value,
+        JSON.stringify({
+          position: panelPosition.value,
+          size: panelSize.value
+        })
+      )
+    }
+  } catch (error) {
+    console.error('Failed to hydrate chat state from cloud', error)
+  }
 }
 
 function onWindowResize() {
@@ -305,6 +370,7 @@ function onBubblePointerUp(event) {
 function onPanelPointerDown(event) {
   if (event.button !== 0) return
   if (event.target?.closest?.('.close-btn')) return
+  if (event.target?.closest?.('.resize-handle')) return
   panelDragState.value = {
     pointerId: event.pointerId,
     startX: event.clientX,
@@ -336,12 +402,17 @@ function onPanelPointerUp(event) {
   savePanelState()
 }
 
-function onResizePointerDown(event) {
+function onResizePointerDown(event, direction) {
   if (event.button !== 0) return
+  event.preventDefault()
+  event.stopPropagation()
   panelResizeState.value = {
     pointerId: event.pointerId,
+    direction,
     startX: event.clientX,
     startY: event.clientY,
+    originX: panelPosition.value.x,
+    originY: panelPosition.value.y,
     originWidth: panelSize.value.width,
     originHeight: panelSize.value.height
   }
@@ -354,13 +425,47 @@ function onResizePointerDown(event) {
 
 function onResizePointerMove(event) {
   if (!panelResizeState.value || event.pointerId !== panelResizeState.value.pointerId) return
+  const direction = panelResizeState.value.direction
   const deltaX = event.clientX - panelResizeState.value.startX
   const deltaY = event.clientY - panelResizeState.value.startY
-  panelSize.value = clampPanelSize({
-    width: panelResizeState.value.originWidth + deltaX,
-    height: panelResizeState.value.originHeight + deltaY
-  })
-  panelPosition.value = clampPanelPosition(panelPosition.value, panelSize.value)
+  let left = panelResizeState.value.originX
+  let top = panelResizeState.value.originY
+  let right = panelResizeState.value.originX + panelResizeState.value.originWidth
+  let bottom = panelResizeState.value.originY + panelResizeState.value.originHeight
+
+  if (direction.includes('e')) {
+    right = Math.min(
+      viewport.value.width - PANEL_PADDING,
+      Math.max(left + PANEL_MIN_WIDTH, right + deltaX)
+    )
+  }
+
+  if (direction.includes('s')) {
+    bottom = Math.min(
+      viewport.value.height - PANEL_PADDING,
+      Math.max(top + PANEL_MIN_HEIGHT, bottom + deltaY)
+    )
+  }
+
+  if (direction.includes('w')) {
+    left = Math.max(
+      PANEL_PADDING,
+      Math.min(right - PANEL_MIN_WIDTH, left + deltaX)
+    )
+  }
+
+  if (direction.includes('n')) {
+    top = Math.max(
+      PANEL_PADDING,
+      Math.min(bottom - PANEL_MIN_HEIGHT, top + deltaY)
+    )
+  }
+
+  panelPosition.value = { x: left, y: top }
+  panelSize.value = {
+    width: right - left,
+    height: bottom - top
+  }
 }
 
 function onResizePointerUp(event) {
@@ -606,6 +711,9 @@ async function sendMessage() {
 watch(bubbleStorageKey, () => {
   resetBubblePosition()
   resetPanelState()
+  if (typeof window !== 'undefined') {
+    hydrateCloudChatState()
+  }
 })
 
 onMounted(() => {
@@ -616,6 +724,7 @@ onMounted(() => {
   }
   resetBubblePosition()
   resetPanelState()
+  hydrateCloudChatState()
   window.addEventListener('resize', onWindowResize)
 })
 
@@ -639,16 +748,16 @@ onBeforeUnmount(() => {
 
 .chat-bubble {
   position: fixed;
-  width: 58px;
-  height: 58px;
+  width: 50px;
+  height: 50px;
   border: none;
   border-radius: 50%;
   background: linear-gradient(135deg, #111827, #1f2937);
   color: #fff;
-  font-size: 26px;
+  font-size: 22px;
   display: grid;
   place-items: center;
-  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.28);
+  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.24);
   pointer-events: auto;
   touch-action: none;
   user-select: none;
@@ -843,28 +952,99 @@ onBeforeUnmount(() => {
 
 .resize-handle {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
-  width: 16px;
-  height: 16px;
   border: none;
   background: transparent;
-  cursor: nwse-resize;
   touch-action: none;
+  z-index: 4;
+  padding: 0;
 }
 
-.resize-handle::before {
+.handle-n,
+.handle-s {
+  left: 18px;
+  right: 18px;
+  height: 10px;
+}
+
+.handle-n {
+  top: 0;
+  cursor: ns-resize;
+}
+
+.handle-s {
+  bottom: 0;
+  cursor: ns-resize;
+}
+
+.handle-e,
+.handle-w {
+  top: 18px;
+  bottom: 18px;
+  width: 10px;
+}
+
+.handle-e {
+  right: 0;
+  cursor: ew-resize;
+}
+
+.handle-w {
+  left: 0;
+  cursor: ew-resize;
+}
+
+.handle-ne,
+.handle-nw,
+.handle-se,
+.handle-sw {
+  width: 18px;
+  height: 18px;
+}
+
+.handle-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.handle-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.handle-se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.handle-sw {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+}
+
+.handle-se::before,
+.handle-sw::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    135deg,
-    transparent 0 40%,
-    rgba(71, 84, 103, 0.4) 40% 52%,
-    transparent 52% 68%,
-    rgba(71, 84, 103, 0.6) 68% 80%,
-    transparent 80%
-  );
+  width: 12px;
+  height: 12px;
+  bottom: 4px;
+  border-bottom: 2px solid rgba(71, 84, 103, 0.45);
+}
+
+.handle-se::before {
+  right: 4px;
+  border-right: 2px solid rgba(71, 84, 103, 0.45);
+  border-bottom-right-radius: 4px;
+}
+
+.handle-sw::before {
+  left: 4px;
+  border-left: 2px solid rgba(71, 84, 103, 0.45);
+  border-bottom-left-radius: 4px;
 }
 
 @media (max-width: 640px) {
