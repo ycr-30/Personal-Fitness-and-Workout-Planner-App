@@ -6,8 +6,14 @@ import jwt from 'jsonwebtoken'
 import appleSignin from 'apple-signin-auth'
 import { PrismaClient } from '@prisma/client'
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import 'dotenv/config'
+import dotenv from 'dotenv'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+dotenv.config({ path: resolve(__dirname, '.env') })
 
 const {
   PORT = 4000,
@@ -47,6 +53,7 @@ const {
 const app = express()
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID)
 const secureCookie = process.env.NODE_ENV === 'production'
+console.info('[config] AI chat endpoint configured:', Boolean(AI_CHAT_API_URL), 'format:', AI_CHAT_API_FORMAT || 'custom')
 const MAX_CHAT_MESSAGE_LENGTH = 2000
 const MAX_CHAT_HISTORY_ITEMS = 200
 const MAX_MODEL_HISTORY_ITEMS = 12
