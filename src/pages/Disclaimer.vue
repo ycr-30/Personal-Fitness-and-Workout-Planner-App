@@ -10,7 +10,8 @@
       <p>
         Fitness AI Planner provides planning, educational, and informational guidance only. It
         does not provide medical diagnosis, treatment, prescription advice, emergency support,
-        or licensed professional supervision.
+        or licensed professional supervision. It should not be treated as the sole basis for
+        important exercise, recovery, or nutrition decisions.
       </p>
       <p>
         Nothing shown in the service should be treated as a substitute for advice from a
@@ -82,7 +83,7 @@
       <h2>Contact and questions</h2>
       <p>
         For questions about this disclaimer, risk-related wording, or general support issues,
-        contact:
+        contact the primary published support and legal channel:
         <strong>13957075669@139.com</strong>
       </p>
     </section>

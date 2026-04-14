@@ -3,7 +3,7 @@
     <header class="legal-header">
       <div class="shell header-shell">
         <RouterLink class="brand" to="/">
-          <img class="brand-logo" src="/photo/logo.png" alt="Keep Fit" />
+          <img class="brand-logo brand-logo-square" src="/photo/keep-fit-icon-square.png" alt="Keep Fit" />
           <span class="brand-copy">
             <strong>KEEP FIT</strong>
             <span>Fitness AI Planner</span>
@@ -87,22 +87,25 @@ defineProps({
 }
 
 .legal-header {
-  padding: 6px 0 0;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  padding: 3px 0 0;
 }
 
 .header-shell {
   width: min(100% - 40px, 1200px);
-  min-height: 58px;
+  min-height: 54px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 7px 11px;
-  border: 1px solid rgba(231, 236, 243, 0.62);
-  border-radius: 18px;
+  gap: 8px;
+  padding: 4px 9px;
+  border: 1px solid rgba(231, 236, 243, 0.36);
+  border-radius: 16px;
   background: rgba(247, 248, 251, 0.66);
-  box-shadow: 0 5px 12px rgba(18, 24, 38, 0.026);
-  backdrop-filter: blur(9px);
+  box-shadow: 0 2px 6px rgba(18, 24, 38, 0.012);
+  backdrop-filter: blur(8px);
 }
 
 .brand {
@@ -114,9 +117,14 @@ defineProps({
 }
 
 .brand-logo {
-  width: 68px;
+  width: 60px;
   max-width: 100%;
   display: block;
+}
+
+.brand-logo-square {
+  width: 25px;
+  border-radius: 8px;
 }
 
 .brand-copy {
@@ -147,7 +155,7 @@ defineProps({
 .footer-links a {
   color: var(--legal-muted);
   text-decoration: none;
-  font-size: 13px;
+  font-size: 11.5px;
   font-weight: 600;
 }
 
@@ -160,20 +168,20 @@ defineProps({
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 31px;
+  padding: 0 10px;
   border-radius: 999px;
   border: 1px solid var(--legal-border);
   text-decoration: none;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
 .btn-primary {
-  border-color: transparent;
-  background: var(--legal-coral);
-  color: #fff;
-  box-shadow: 0 5px 12px rgba(255, 90, 95, 0.085);
+  border-color: rgba(255, 90, 95, 0.14);
+  background: rgba(255, 90, 95, 0.09);
+  color: var(--legal-coral);
+  box-shadow: none;
 }
 
 .legal-hero {

@@ -16,8 +16,20 @@ CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_WORD_RE = re.compile(r"\b[A-Za-z]{3,}\b")
 WORKOUT_LEAK_RE = re.compile(
     r"\b(?:plank|crunch(?:es)?|twist(?:s)?|leg raise(?:s)?|bicycle crunch(?:es)?|reverse crunch(?:es)?|"
-    r"squat|deadlift|bench|lunge|push[- ]?up|pull[- ]?up|sets?|reps?|workout routine|exercise routine)\b|"
-    r"(?:平板支撑|卷腹|俄罗斯转体|抬腿|深蹲|硬拉|卧推|组数|次数|训练动作|训练安排)",
+    r"squat|deadlift|bench|lunge|push[- ]?up|pull[- ]?up|sets?|reps?|"
+    r"workout routine|exercise routine|training plan|cardio day|full body|upper body|lower body|"
+    r"goal and assumptions|training plan|progression rule|safety and recovery|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|"
+    r"(?:平板支撑|卷腹|俄罗斯转体|抬腿|深蹲|硬拉|卧推|组数|次数|训练动作|训练安排|"
+    r"训练计划|全身训练|上肢训练|下肢训练|周一|周二|周三|周四|周五|周六|周日)",
+    re.I,
+)
+EN_SECTION_RE = re.compile(
+    r"\b(?:Goal and assumptions|Training plan|Progression rule|Safety and recovery|"
+    r"Target calories and protein|Meal plan|Weekly adjustment rule|Snack guardrails)\b",
+    re.I,
+)
+DURATION_WEEK_RE = re.compile(
+    r"\b(?:7\s*day|7-day|weekly|week)\b|(?:一周|七天|7天|本周)",
     re.I,
 )
 
@@ -34,19 +46,34 @@ def _is_cjk_user_message(text: str) -> bool:
     return _contains_cjk(text)
 
 
-def _needs_rewrite(user_message: str, answer: str) -> bool:
-    text = (answer or "").strip()
-    if not text:
+def _looks_like_markdown_table(text: str) -> bool:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if len(lines) < 2:
+        return False
+    if "|" not in lines[0]:
+        return False
+    return any(re.match(r"^\|?\s*:?-{3,}", line.replace("|", "").strip()) for line in lines[1:3])
+
+
+def _needs_rewrite(user_message: str, text: str) -> bool:
+    body = (text or "").strip()
+    if not body:
         return True
-    if PLACEHOLDER_RE.search(text):
+    if PLACEHOLDER_RE.search(body):
         return True
-    if _is_cjk_user_message(user_message) and not _contains_cjk(text):
+    if len(body) < 60:
         return True
-    if _is_cjk_user_message(user_message) and _latin_word_count(text) >= 6:
+    if _looks_like_markdown_table(body):
         return True
-    if not _is_cjk_user_message(user_message) and _contains_cjk(text):
+    if WORKOUT_LEAK_RE.search(body):
         return True
-    if WORKOUT_LEAK_RE.search(text):
+    if _is_cjk_user_message(user_message):
+        if EN_SECTION_RE.search(body):
+            return True
+        english_words = re.findall(r"[A-Za-z]{3,}", body)
+        if len(english_words) >= 4:
+            return True
+    elif _contains_cjk(body):
         return True
     return False
 
@@ -66,22 +93,47 @@ def _strip_workout_leak(text: str) -> str:
 
 
 def _rewrite_answer(user_message: str, draft_answer: str) -> str:
-    target_language = "Chinese" if _is_cjk_user_message(user_message) else "English"
+    is_cjk = _is_cjk_user_message(user_message)
+    target_language = "Chinese" if is_cjk else "English"
+
+    if is_cjk:
+        section_instruction = (
+            "必须使用以下四个中文小节标题，且完全按此标题输出：\n"
+            "1) 目标热量与蛋白\n"
+            "2) 饮食计划\n"
+            "3) 每周调整规则\n"
+            "4) 加餐与零食原则\n"
+        )
+        duration_instruction = (
+            "如果用户问的是一周/七天饮食计划，就提供一周饮食计划。"
+            "如果用户没有明确写时长，默认提供一天示例。"
+        )
+    else:
+        section_instruction = (
+            "Use these exact section titles:\n"
+            "1) Target calories and protein\n"
+            "2) Meal plan\n"
+            "3) Weekly adjustment rule\n"
+            "4) Snack guardrails\n"
+        )
+        duration_instruction = (
+            "If the user asked for a weekly or 7-day meal plan, provide a weekly / 7-day meal plan. "
+            "If no duration is specified, provide a 1-day example."
+        )
+
     rewrite_user = (
         "Rewrite the draft answer so it is directly usable.\n"
         "Rules:\n"
         f"- Output only in {target_language}.\n"
         "- Answer ONLY the nutrition and dietary part of the request.\n"
-        "- Do NOT include exercise names, workout routines, sets, reps, or exercise programming.\n"
+        "- Do NOT include exercise names, workout routines, cardio plans, sets, reps, or training programming.\n"
+        "- If the user explicitly asked only for a meal plan or nutrition plan, do not mention training at all.\n"
         "- Give exactly ONE best-fit plan unless the user explicitly asked for alternatives.\n"
         "- Use the user details already provided instead of replacing them with generic advice.\n"
         "- If body weight and goal are available, include specific calorie and protein ranges.\n"
         "- If information is missing, make only ONE conservative assumption and state it briefly.\n"
-        "- Use exactly four sections with these meanings, translated into the target language:\n"
-        "  1) Target calories and protein\n"
-        "  2) 1-day meal plan\n"
-        "  3) Weekly adjustment rule\n"
-        "  4) Snack guardrail\n"
+        f"- {duration_instruction}\n"
+        f"- {section_instruction}\n"
         "- Use normal prose unless the user explicitly asked for a table. If they did, use a clean GitHub-flavored Markdown table.\n"
         "- Do not mix languages in the same answer.\n"
         "- Do NOT output placeholders such as <...>, [X], {{...}}, TBD, N/A, null.\n"

@@ -3,9 +3,9 @@
     <header class="nutrition-head">
       <div>
         <p class="nutrition-eyebrow">Nutrition System</p>
-        <strong>Meal log and food entry</strong>
+        <strong>Meal log summary</strong>
       </div>
-      <span class="nutrition-add">+ Add Food</span>
+      <span class="nutrition-add">Add food</span>
     </header>
 
     <div class="meal-tabs">
@@ -24,7 +24,7 @@
       <article class="meal-log-card">
         <header class="meal-log-head">
           <div>
-            <span class="log-kicker">Meal log</span>
+            <span class="log-kicker">Latest meal</span>
             <strong>Dinner</strong>
           </div>
           <span class="meal-total">292 kcal · 1 item</span>
@@ -36,24 +36,6 @@
             <span>Protein 12.4 g · Carbs 31 g · Fat 13.3 g</span>
           </div>
           <small>100 g</small>
-        </div>
-      </article>
-
-      <article class="add-food-card">
-        <div class="add-food-head">
-          <div class="add-food-tabs">
-            <span class="active">Search Food</span>
-            <span>Custom Food</span>
-          </div>
-          <div class="search-field">sandwich</div>
-        </div>
-
-        <div class="search-result">
-          <div>
-            <strong>Sandwiches</strong>
-            <span>Tastee Bites · Protein 12.39 · Carbs 30.97 · Fat 13.27</span>
-          </div>
-          <small>292 kcal / 100g</small>
         </div>
       </article>
     </div>
@@ -69,10 +51,10 @@
 
 <script setup>
 const meals = [
-  { label: 'Breakfast', note: '0 kcal · 0 items', active: false },
-  { label: 'Lunch', note: '0 kcal · 0 items', active: false },
-  { label: 'Dinner', note: '292 kcal · 1 item', active: true },
-  { label: 'Snacks', note: '0 kcal · 0 items', active: false }
+  { label: 'Breakfast', note: '0 kcal', active: false },
+  { label: 'Lunch', note: '0 kcal', active: false },
+  { label: 'Dinner', note: '292 kcal', active: true },
+  { label: 'Snacks', note: '0 kcal', active: false }
 ]
 
 const trends = [
@@ -86,12 +68,12 @@ const trends = [
 <style scoped>
 .nutrition-mockup {
   border: 1px solid #e7ecf3;
-  border-radius: 28px;
+  border-radius: 24px;
   background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 18px 44px rgba(18, 24, 38, 0.06);
-  padding: 18px;
+  box-shadow: 0 16px 36px rgba(18, 24, 38, 0.05);
+  padding: 16px;
   display: grid;
-  gap: 14px;
+  gap: 11px;
 }
 
 .nutrition-head {
@@ -112,16 +94,16 @@ const trends = [
 }
 
 .nutrition-head strong {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.15;
   color: #121826;
   display: block;
-  max-width: 180px;
+  max-width: 150px;
 }
 
 .nutrition-add {
-  min-height: 30px;
-  padding: 0 11px;
+  min-height: 28px;
+  padding: 0 10px;
   border-radius: 999px;
   background: rgba(255, 90, 95, 0.1);
   color: #ff5a5f;
@@ -135,14 +117,14 @@ const trends = [
 .meal-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .meal-tab {
   border: 1px solid #e7ecf3;
-  border-radius: 16px;
+  border-radius: 13px;
   background: #fcfdff;
-  padding: 9px 11px;
+  padding: 8px 9px;
   display: grid;
   gap: 3px;
   flex: 1 1 calc(50% - 4px);
@@ -150,14 +132,14 @@ const trends = [
 }
 
 .meal-tab strong {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.2;
   color: #121826;
 }
 
 .meal-tab span {
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 10px;
+  line-height: 1.4;
   color: #667085;
 }
 
@@ -168,17 +150,16 @@ const trends = [
 
 .nutrition-stack {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
-.meal-log-card,
-.add-food-card {
+.meal-log-card {
   border: 1px solid #e7ecf3;
-  border-radius: 20px;
+  border-radius: 18px;
   background: linear-gradient(180deg, #fcfdff 0%, #f8fbff 100%);
-  padding: 13px;
+  padding: 12px;
   display: grid;
-  gap: 10px;
+  gap: 9px;
 }
 
 .meal-log-head {
@@ -200,7 +181,7 @@ const trends = [
 }
 
 .meal-log-head strong {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.15;
   color: #121826;
 }
@@ -223,78 +204,15 @@ const trends = [
   border: 1px solid #e7ecf3;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.94);
-  padding: 11px;
+  padding: 10px;
 }
 
-.meal-entry strong,
-.search-result strong {
+.meal-entry strong {
   display: block;
   margin-bottom: 4px;
   font-size: 14px;
   line-height: 1.2;
   color: #121826;
-}
-
-.add-food-head {
-  display: grid;
-  gap: 8px;
-}
-
-.add-food-tabs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.add-food-tabs span {
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid #e7ecf3;
-  background: #f7f8fb;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: #667085;
-}
-
-.add-food-tabs .active {
-  border-color: rgba(255, 90, 95, 0.2);
-  background: rgba(255, 90, 95, 0.08);
-  color: #ff5a5f;
-}
-
-.search-field {
-  min-height: 38px;
-  border: 1px solid #e7ecf3;
-  border-radius: 14px;
-  background: #f7f8fb;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  font-size: 12px;
-  color: #121826;
-}
-
-.search-result {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  border: 1px solid #e7ecf3;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.94);
-  padding: 11px;
-}
-
-.search-result span,
-.search-result small {
-  font-size: 11px;
-  line-height: 1.45;
-  color: #667085;
 }
 
 .trend-row {

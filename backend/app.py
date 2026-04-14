@@ -20,7 +20,7 @@ from agents.nutrition_agent import (
     answer_food_estimate as nutrition_food_estimate,
     answer_target_pack as nutrition_target_pack,
 )
-from agents.router import route, scoped_message
+from agents.router import BOTH_EXPLICIT, route, scoped_message
 from agents.workout_agent import answer as workout_answer
 
 app = FastAPI(title="KeepFit Multi-Agent API", version="0.1.0")
@@ -362,6 +362,31 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
     profile = _extract_profile(req)
     external_evidence = _extract_external_evidence(req)
     r = route(message)
+    lowered = message.strip().lower()
+    explicit_dual_intent = bool(BOTH_EXPLICIT.search(message))
+
+    nutrition_only_guard = (
+        re.search(r"(?:饮食计划|食谱|餐单|一周饮食|七天饮食|只要饮食|不要训练)", message, re.I)
+        or re.search(
+            r"\b(?:meal plan|diet plan|nutrition plan|nutrition only|diet only|no workout|no training)\b",
+            lowered,
+            re.I,
+        )
+    )
+
+    workout_only_guard = (
+        re.search(r"(?:训练计划|健身计划|只要训练|不要饮食)", message, re.I)
+        or re.search(
+            r"\b(?:workout plan|training plan|workout only|training only|no diet|no nutrition)\b",
+            lowered,
+            re.I,
+        )
+    )
+
+    if nutrition_only_guard and not explicit_dual_intent:
+        r = "nutrition"
+    elif workout_only_guard and not explicit_dual_intent:
+        r = "workout"
 
     if r == "nutrition":
         out, ev = nutrition_answer(
@@ -385,6 +410,7 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
         response["content"] = out
         return response
 
+    is_cjk = _contains_cjk(message)
     out_w, ev_w = workout_answer(
         scoped_message(message, "workout"),
         user_profile=profile,
@@ -397,10 +423,10 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
         use_rag=req.use_rag,
         external_evidence=external_evidence,
     )
-    if _contains_cjk(message):
-        merged = "训练建议:\n" + out_w + "\n\n饮食建议:\n" + out_n
+    if is_cjk:
+        merged = f"训练建议：\n{out_w}\n\n饮食建议：\n{out_n}"
     else:
-        merged = "WORKOUT ADVICE:\n" + out_w + "\n\nNUTRITION ADVICE:\n" + out_n
+        merged = f"Workout guidance:\n{out_w}\n\nNutrition guidance:\n{out_n}"
     response = {
         "route": "both",
         "answer": merged,

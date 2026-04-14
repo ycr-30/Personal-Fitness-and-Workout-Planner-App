@@ -126,6 +126,12 @@
         security risk, or enforce these Terms. You may stop using the service at any time and
         may use available account deletion tools where provided.
       </p>
+      <p>
+        Suspension, deletion, or termination does not always mean every operational record is
+        erased immediately. Certain account, security, fraud-prevention, support, backup, and
+        compliance records may remain for a limited period where retention is reasonably
+        necessary and permitted by law, as further described in the Privacy Policy.
+      </p>
     </section>
 
     <section>
@@ -175,9 +181,10 @@
     </section>
 
     <section>
-      <h2>Contact</h2>
+      <h2>Contact and legal notices</h2>
       <p>
-        For general legal, account, or service questions relating to these Terms, contact:
+        For general legal, account, or service questions relating to these Terms, or to send a
+        legal notice relating to the service, use the primary published contact channel:
         <strong>13957075669@139.com</strong>
       </p>
     </section>

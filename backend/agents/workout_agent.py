@@ -10,9 +10,13 @@ PLACEHOLDER_RE = re.compile(r"<[^>\n]{1,80}>|\{\{[^}\n]{1,80}\}\}|\[[A-Za-z_ ]{1
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_WORD_RE = re.compile(r"\b[A-Za-z]{3,}\b")
 NUTRITION_LEAK_RE = re.compile(
-    r"\b(?:calories?|kcal|protein|carbs?|fat|meal(?:s)?|diet(?:ary)?|breakfast|lunch|dinner|snack|"
-    r"food(?:s)?|macros?|portion|intake)\b|"
-    r"(?:热量|卡路里|蛋白|碳水|脂肪|饮食|早餐|午餐|晚餐|零食|食物)",
+    r"\b(?:calories?|kcal|protein|carb(?:s)?|fat(?:s)?|macro(?:s)?|meal(?:s)?|diet|nutrition|breakfast|lunch|dinner|snack|hydration|water)\b|"
+    r"(?:热量|卡路里|蛋白|碳水|脂肪|饮食|营养|早餐|午餐|晚餐|加餐|零食|补水|喝水)",
+    re.I,
+)
+EN_SECTION_RE = re.compile(
+    r"\b(?:Goal and assumptions|Training plan|Progression rule|Safety and recovery|"
+    r"Target calories and protein|Meal plan|Weekly adjustment rule|Snack guardrails)\b",
     re.I,
 )
 
@@ -29,19 +33,34 @@ def _is_cjk_user_message(text: str) -> bool:
     return _contains_cjk(text)
 
 
-def _needs_rewrite(user_message: str, answer: str) -> bool:
-    text = (answer or "").strip()
-    if not text:
+def _looks_like_markdown_table(text: str) -> bool:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if len(lines) < 2:
+        return False
+    if "|" not in lines[0]:
+        return False
+    return any(re.match(r"^\|?\s*:?-{3,}", line.replace("|", "").strip()) for line in lines[1:3])
+
+
+def _needs_rewrite(user_message: str, text: str) -> bool:
+    body = (text or "").strip()
+    if not body:
         return True
-    if PLACEHOLDER_RE.search(text):
+    if PLACEHOLDER_RE.search(body):
         return True
-    if _is_cjk_user_message(user_message) and not _contains_cjk(text):
+    if len(body) < 60:
         return True
-    if _is_cjk_user_message(user_message) and _latin_word_count(text) >= 6:
+    if _looks_like_markdown_table(body):
         return True
-    if not _is_cjk_user_message(user_message) and _contains_cjk(text):
+    if NUTRITION_LEAK_RE.search(body):
         return True
-    if NUTRITION_LEAK_RE.search(text):
+    if _is_cjk_user_message(user_message):
+        if EN_SECTION_RE.search(body):
+            return True
+        english_words = re.findall(r"[A-Za-z]{3,}", body)
+        if len(english_words) >= 4:
+            return True
+    elif _contains_cjk(body):
         return True
     return False
 
@@ -61,7 +80,26 @@ def _strip_nutrition_leak(text: str) -> str:
 
 
 def _rewrite_answer(user_message: str, draft_answer: str) -> str:
-    target_language = "Chinese" if _is_cjk_user_message(user_message) else "English"
+    is_cjk = _is_cjk_user_message(user_message)
+    target_language = "Chinese" if is_cjk else "English"
+
+    if is_cjk:
+        section_instruction = (
+            "必须使用以下四个中文小节标题，且完全按此标题输出：\n"
+            "1) 目标与前提\n"
+            "2) 训练安排\n"
+            "3) 进阶规则\n"
+            "4) 恢复与注意事项\n"
+        )
+    else:
+        section_instruction = (
+            "Use these exact section titles:\n"
+            "1) Goal and assumptions\n"
+            "2) Training plan\n"
+            "3) Progression rule\n"
+            "4) Safety and recovery\n"
+        )
+
     rewrite_user = (
         "Rewrite the draft answer so it is directly usable.\n"
         "Rules:\n"
@@ -71,11 +109,7 @@ def _rewrite_answer(user_message: str, draft_answer: str) -> str:
         "- Give exactly ONE best-fit plan unless the user explicitly asked for alternatives.\n"
         "- Use the user details already provided instead of replacing them with generic advice.\n"
         "- If information is missing, make only ONE conservative assumption and state it briefly.\n"
-        "- Use exactly four sections with these meanings, translated into the target language:\n"
-        "  1) Goal and assumptions\n"
-        "  2) Training plan\n"
-        "  3) Progression rule\n"
-        "  4) Safety and recovery\n"
+        f"- {section_instruction}\n"
         "- In the training plan, include specific sets, reps, and rest when relevant.\n"
         "- Use normal prose unless the user explicitly asked for a table. If they did, use a clean GitHub-flavored Markdown table.\n"
         "- Do not mix languages in the same answer.\n"

@@ -12,19 +12,21 @@
     </header>
 
     <div class="analytics-grid">
-      <article v-for="metric in metrics" :key="metric.label" class="analytics-stat">
+      <article
+        v-for="metric in metrics"
+        :key="metric.label"
+        class="analytics-stat"
+        :class="{ 'analytics-stat-wide': metric.wide }"
+      >
         <span>{{ metric.label }}</span>
         <strong>{{ metric.value }}</strong>
         <small>{{ metric.note }}</small>
       </article>
     </div>
 
-    <article class="analytics-action">
-      <div>
-        <span class="action-kicker">This week</span>
-        <strong>Close your weekly minutes gap</strong>
-      </div>
-      <span class="action-chip">+30 min vs previous</span>
+    <article class="analytics-note">
+      <span>This week</span>
+      <strong>4-day streak and body-progress signals still in view.</strong>
     </article>
   </article>
 </template>
@@ -33,20 +35,19 @@
 const metrics = [
   { label: 'Completion', value: '67%', note: '3 of 4 sessions' },
   { label: 'Active Minutes', value: '120', note: '4 min per day' },
-  { label: 'Current Streak', value: '4 days', note: 'Best: 7 days' },
-  { label: 'Calories Burned', value: '720', note: 'Estimated output' }
+  { label: 'Body Trend', value: 'Stable', note: 'Weight and body logs in view', wide: true }
 ]
 </script>
 
 <style scoped>
 .analytics-mockup {
   border: 1px solid #e7ecf3;
-  border-radius: 28px;
+  border-radius: 24px;
   background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 18px 44px rgba(18, 24, 38, 0.06);
-  padding: 18px;
+  box-shadow: 0 16px 36px rgba(18, 24, 38, 0.05);
+  padding: 16px;
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .analytics-head {
@@ -67,7 +68,7 @@ const metrics = [
 }
 
 .analytics-head strong {
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.15;
   color: #121826;
 }
@@ -101,16 +102,21 @@ const metrics = [
 .analytics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .analytics-stat {
   border: 1px solid #e7ecf3;
-  border-radius: 18px;
+  border-radius: 16px;
   background: linear-gradient(180deg, #fcfdff 0%, #f8faff 100%);
-  padding: 12px;
+  padding: 11px;
   display: grid;
   gap: 4px;
+}
+
+.analytics-stat-wide strong {
+  font-size: 20px;
+  letter-spacing: -0.02em;
 }
 
 .analytics-stat span {
@@ -121,7 +127,7 @@ const metrics = [
 }
 
 .analytics-stat strong {
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1;
   letter-spacing: -0.03em;
   color: #121826;
@@ -133,20 +139,16 @@ const metrics = [
   color: #667085;
 }
 
-.analytics-action {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.analytics-note {
+  display: grid;
+  gap: 4px;
   border: 1px solid rgba(75, 123, 255, 0.12);
-  border-radius: 18px;
+  border-radius: 16px;
   background: linear-gradient(180deg, rgba(75, 123, 255, 0.06), rgba(255, 255, 255, 0.96));
-  padding: 14px;
+  padding: 12px;
 }
 
-.action-kicker {
-  display: block;
-  margin-bottom: 4px;
+.analytics-note span {
   font-size: 11px;
   line-height: 1;
   letter-spacing: 0.08em;
@@ -155,33 +157,15 @@ const metrics = [
   font-weight: 700;
 }
 
-.analytics-action strong {
-  font-size: 16px;
-  line-height: 1.25;
+.analytics-note strong {
+  font-size: 15px;
+  line-height: 1.28;
   color: #121826;
-}
-
-.action-chip {
-  min-height: 30px;
-  padding: 0 11px;
-  border-radius: 999px;
-  background: rgba(223, 247, 234, 0.95);
-  color: #1f9254;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 @media (max-width: 680px) {
   .analytics-grid {
     grid-template-columns: 1fr;
-  }
-
-  .analytics-action {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
 </style>

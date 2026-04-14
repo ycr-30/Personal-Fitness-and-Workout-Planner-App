@@ -205,6 +205,10 @@ const ringStyle = computed(() => ({
   background: var(--surface-muted);
   display: grid;
   gap: 4px;
+  min-height: 132px;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
 }
 
 .metric span,

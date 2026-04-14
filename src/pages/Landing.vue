@@ -3,7 +3,7 @@
     <header ref="navRef" class="landing-nav">
       <div class="shell nav-shell">
         <RouterLink class="brand" to="/">
-          <img class="brand-logo" src="/photo/logo.png" alt="Keep Fit" />
+          <img class="brand-logo brand-logo-square" src="/photo/keep-fit-icon-square.png" alt="Keep Fit" />
           <span class="brand-copy">
             <strong>KEEP FIT</strong>
             <span>Fitness AI Planner</span>
@@ -35,10 +35,7 @@
         <span class="eyebrow">FITNESS AI PLANNER</span>
         <h1>Grounded AI for training and nutrition.</h1>
         <p class="hero-body">
-          Planning, coaching, analytics, and meal logging in one calmer system.
-        </p>
-        <p class="hero-core">
-          Muscle planning · AI coach · Analytics · Meals
+          Plan the week, coach the work, and keep body, training, and meals in view in one calm system.
         </p>
       </div>
 
@@ -53,11 +50,12 @@
                 <span class="card-kicker">AI Weekly Coach</span>
                 <strong>Grounded weekly adjustment</strong>
               </div>
-              <span class="card-badge badge-neutral badge-wide">Training · Recovery · Nutrition · Body</span>
             </div>
 
+            <p class="coach-evidence-line">Workouts · Body trends · Meals · Recovery</p>
+
             <p class="coach-summary">
-              One grounded weekly adjustment tied to your workouts, recovery, body logs, and meals.
+              One weekly recommendation tied to training, body trends, meals, and recovery.
             </p>
 
             <div class="coach-recommendations">
@@ -72,7 +70,7 @@
             </div>
 
             <div class="coach-proof">
-              <span>Based on your last 7 days</span>
+              <span>Last 7 days in view</span>
               <strong>Ready for this week</strong>
             </div>
           </article>
@@ -147,7 +145,7 @@
           <span class="eyebrow">AI GUIDANCE</span>
           <h3>Weekly coaching and chat stay tied to your actual logs</h3>
           <p>
-            The AI coach reviews workouts, recovery, body logs, and meals before it suggests
+            The AI coach reviews workouts, recovery, body trends, and meals before it suggests
             the next weekly adjustment or answers your question.
           </p>
         </div>
@@ -173,10 +171,6 @@
                   <span>Keep upper-back volume and trim one lower-priority accessory block.</span>
                 </div>
                 <div class="recommendation-item">
-                  <strong>Nutrition</strong>
-                  <span>Raise protein on heavy days and keep hydration steady.</span>
-                </div>
-                <div class="recommendation-item">
                   <strong>Recovery</strong>
                   <span>Place one lighter day after your peak load session.</span>
                 </div>
@@ -184,7 +178,7 @@
 
               <div class="recommendation-foot">
                 <span>Signals from workouts, body logs, meals, and recovery.</span>
-                <strong>Change this week, not everything.</strong>
+                <strong>One clear weekly change.</strong>
               </div>
             </article>
 
@@ -223,7 +217,7 @@
           <span class="eyebrow">CONNECTED TRACKING</span>
           <h3>Training analytics, meal logs, and food entry live in one system</h3>
           <p>
-            Review adherence, session output, meal-level macros, and daily nutrition trends
+            Review adherence, body-progress signals, meal-level macros, and daily nutrition trends
             without jumping between disconnected tools.
           </p>
         </div>
@@ -233,6 +227,21 @@
             <LandingTrainingAnalyticsMockup class="system-proof-card analytics-proof-card" />
             <LandingNutritionSystemMockup class="system-proof-card nutrition-proof-card" />
           </div>
+        </div>
+      </div>
+
+      <div class="proof-row proof-row-progress">
+        <div class="proof-visual" aria-hidden="true">
+          <LandingAnalyticsReviewBoard class="review-board-card" />
+        </div>
+
+        <div class="proof-copy proof-copy-centered proof-copy-right">
+          <span class="eyebrow">PROGRESS VISIBILITY</span>
+          <h3>See weekly volume and nutrition trends together</h3>
+          <p>
+            Training volume, calories, protein, carbs, and hydration stay visible in one
+            weekly review, so the next adjustment comes from what actually changed in your data.
+          </p>
         </div>
       </div>
     </section>
@@ -259,25 +268,30 @@
     <footer class="landing-footer">
       <div class="shell footer-shell">
         <div class="footer-top">
-          <RouterLink class="brand footer-brand" to="/">
-            <img class="brand-logo" src="/photo/logo.png" alt="Keep Fit" />
-            <span class="brand-copy">
-              <strong>KEEP FIT</strong>
-              <span>Fitness AI Planner</span>
-            </span>
-          </RouterLink>
+          <div class="footer-brand-block">
+            <RouterLink class="brand footer-brand" to="/">
+              <img class="brand-logo brand-logo-square footer-brand-logo" src="/photo/keep-fit-icon-square.png" alt="Keep Fit" />
+              <span class="brand-copy">
+                <strong>KEEP FIT</strong>
+                <span>Fitness AI Planner</span>
+              </span>
+            </RouterLink>
+            <p class="footer-description">
+              Grounded AI guidance for training, analytics, and meals.
+            </p>
+          </div>
 
           <div class="footer-links">
-            <RouterLink to="/login">Sign in</RouterLink>
-            <RouterLink to="/register">Get started</RouterLink>
-            <RouterLink to="/privacy">Privacy</RouterLink>
-            <RouterLink to="/terms">Terms</RouterLink>
-            <RouterLink to="/disclaimer">Disclaimer</RouterLink>
+            <RouterLink class="footer-link-action" to="/login">Sign in</RouterLink>
+            <RouterLink class="footer-link-action" to="/register">Get started</RouterLink>
+            <RouterLink class="footer-link-legal" to="/privacy">Privacy</RouterLink>
+            <RouterLink class="footer-link-legal" to="/terms">Terms</RouterLink>
+            <RouterLink class="footer-link-legal" to="/disclaimer">Disclaimer</RouterLink>
           </div>
         </div>
 
         <p class="footer-note">
-          AI planning and educational guidance only, not medical diagnosis or treatment.
+          Planning and educational guidance only. Not medical diagnosis or treatment.
         </p>
       </div>
     </footer>
@@ -286,6 +300,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import LandingAnalyticsReviewBoard from '@/components/landing/LandingAnalyticsReviewBoard.vue'
 import LandingAiChatMockup from '@/components/landing/LandingAiChatMockup.vue'
 import LandingMuscleMapMockup from '@/components/landing/LandingMuscleMapMockup.vue'
 import LandingNutritionSystemMockup from '@/components/landing/LandingNutritionSystemMockup.vue'
@@ -310,25 +325,25 @@ const navLinks = [
 const features = [
   {
     title: 'Multi-agent AI coach',
-    body: 'Training, recovery, body trends, and meals are reviewed before one grounded recommendation is produced.',
+    body: 'Training, recovery, body trends, and meals feed grounded recommendations.',
     icon: 'spark',
     tone: 'tone-coral'
   },
   {
     title: 'Muscle-cluster session builder',
-    body: 'Choose the target cluster from the muscle map and build the right session instead of browsing generic templates.',
+    body: 'Choose the target cluster from the map and build sessions without generic templates.',
     icon: 'target',
     tone: 'tone-blue'
   },
   {
     title: 'Training analytics and adherence',
-    body: 'Review completion, minutes, streaks, and body-trend context so weekly decisions stay anchored.',
+    body: 'Review completion, minutes, streaks, and body-progress context in one surface.',
     icon: 'chart',
     tone: 'tone-green'
   },
   {
     title: 'Meal logging and nutrition intelligence',
-    body: 'Track meals, food entries, and daily macro trends inside the same system.',
+    body: 'Track meals, food entries, and macro summaries inside the same system.',
     icon: 'list',
     tone: 'tone-soft'
   }
@@ -337,18 +352,18 @@ const features = [
 const steps = [
   {
     number: '1',
-    title: 'Choose the target and shape the week',
-    body: 'Pick the muscle focus, set direction, and build around what matters most.'
+    title: 'Pick the focus and schedule the week',
+    body: 'Choose the focus, build the session, and place it into the week.'
   },
   {
     number: '2',
     title: 'Log what actually happened',
-    body: 'Workouts, meals, hydration, and body signals create the evidence the system uses.'
+    body: 'Log workouts, meals, hydration, and body signals as they happen.'
   },
   {
     number: '3',
     title: 'Adjust next week from real data',
-    body: 'Use analytics and grounded AI guidance to change the plan without guessing.'
+    body: 'Use analytics and grounded AI guidance to shape the next week.'
   }
 ]
 
@@ -502,9 +517,9 @@ onBeforeUnmount(() => {
   --landing-blue: #4b7bff;
   --landing-green: #1f9254;
   --landing-success: #dff7ea;
-  --landing-shadow: 0 18px 42px rgba(18, 24, 38, 0.045);
-  --landing-shadow-soft: 0 12px 24px rgba(18, 24, 38, 0.032);
-  --landing-nav-height: 58px;
+  --landing-shadow: 0 14px 34px rgba(18, 24, 38, 0.036);
+  --landing-shadow-soft: 0 10px 20px rgba(18, 24, 38, 0.024);
+  --landing-nav-height: 60px;
   min-height: 100vh;
   background: var(--landing-bg);
   color: var(--landing-text);
@@ -547,7 +562,7 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 30;
-  padding: 6px 0 0;
+  padding: 4px 0 0;
 }
 
 .nav-shell {
@@ -556,12 +571,12 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 7px 11px;
-  border: 1px solid rgba(231, 236, 243, 0.62);
-  border-radius: 18px;
-  background: rgba(247, 248, 251, 0.66);
-  box-shadow: 0 5px 12px rgba(18, 24, 38, 0.026);
-  backdrop-filter: blur(9px);
+  padding: 4px 10px;
+  border: 1px solid rgba(231, 236, 243, 0.38);
+  border-radius: 16px;
+  background: rgba(247, 248, 251, 0.69);
+  box-shadow: 0 2px 6px rgba(18, 24, 38, 0.01);
+  backdrop-filter: blur(8px);
 }
 
 .brand,
@@ -574,9 +589,14 @@ onBeforeUnmount(() => {
 }
 
 .brand-logo {
-  width: 68px;
+  width: 60px;
   max-width: 100%;
   display: block;
+}
+
+.brand-logo-square {
+  width: 25px;
+  border-radius: 8px;
 }
 
 .brand-copy {
@@ -585,14 +605,14 @@ onBeforeUnmount(() => {
 }
 
 .brand-copy strong {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.1;
   letter-spacing: 0.08em;
 }
 
 .brand-copy span:last-child {
   color: var(--landing-muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
 }
 
@@ -605,7 +625,7 @@ onBeforeUnmount(() => {
 }
 
 .nav-links {
-  gap: 4px;
+  gap: 6px;
 }
 
 .nav-actions,
@@ -614,7 +634,7 @@ onBeforeUnmount(() => {
 }
 
 .footer-links {
-  gap: 12px 16px;
+  gap: 10px 12px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -625,11 +645,11 @@ onBeforeUnmount(() => {
   justify-content: center;
   min-height: 30px;
   padding: 0 8px;
-  border-radius: 12px;
+  border-radius: 11px;
   border: 1px solid transparent;
   text-decoration: none;
   color: var(--landing-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   background: transparent;
   transition:
@@ -648,7 +668,7 @@ onBeforeUnmount(() => {
   color: var(--landing-text);
   background: rgba(255, 255, 255, 0.84);
   border-color: rgba(231, 236, 243, 0.76);
-  box-shadow: 0 3px 8px rgba(18, 24, 38, 0.026);
+  box-shadow: 0 2px 6px rgba(18, 24, 38, 0.02);
 }
 
 .btn {
@@ -675,8 +695,8 @@ onBeforeUnmount(() => {
 
 .nav-btn {
   min-height: 36px;
-  padding: 0 12px;
-  font-size: 12px;
+  padding: 0 9px;
+  font-size: 13px;
 }
 
 .btn-ghost {
@@ -685,10 +705,10 @@ onBeforeUnmount(() => {
 }
 
 .btn-primary {
-  border-color: transparent;
-  background: var(--landing-coral);
-  color: #fff;
-  box-shadow: 0 12px 24px rgba(255, 90, 95, 0.15);
+  border-color: rgba(255, 90, 95, 0.16);
+  background: rgba(255, 90, 95, 0.12);
+  color: var(--landing-coral);
+  box-shadow: none;
 }
 
 .nav-actions .btn-ghost {
@@ -696,24 +716,26 @@ onBeforeUnmount(() => {
 }
 
 .nav-actions .btn-primary {
-  box-shadow: 0 5px 12px rgba(255, 90, 95, 0.085);
+  background: rgba(255, 90, 95, 0.075);
+  border-color: rgba(255, 90, 95, 0.1);
+  box-shadow: none;
 }
 
 .hero-section {
   display: grid;
   justify-items: center;
-  gap: 16px;
-  padding-top: clamp(22px, 3vw, 34px);
-  padding-bottom: 8px;
+  gap: 9px;
+  padding-top: clamp(16px, 2.4vw, 24px);
+  padding-bottom: 4px;
 }
 
 .hero-copy {
   display: grid;
-  gap: 10px;
+  gap: 7px;
   align-content: start;
   justify-items: center;
   text-align: center;
-  max-width: 42rem;
+  max-width: 50rem;
 }
 
 .eyebrow {
@@ -737,9 +759,9 @@ onBeforeUnmount(() => {
 }
 
 .hero-copy h1 {
-  max-width: 11.6ch;
-  font-size: clamp(28px, 2.65vw, 40px);
-  line-height: 1.06;
+  max-width: 17ch;
+  font-size: clamp(24px, 2.1vw, 33px);
+  line-height: 1.01;
 }
 
 .hero-body,
@@ -754,24 +776,16 @@ onBeforeUnmount(() => {
 }
 
 .hero-body {
-  max-width: 32rem;
+  max-width: 33rem;
   font-size: 15px;
-  line-height: 1.52;
-}
-
-.hero-core {
-  margin: 0;
-  color: var(--landing-muted);
-  font-size: 11px;
-  line-height: 1.45;
-  letter-spacing: 0.04em;
+  line-height: 1.58;
 }
 
 .hero-proof {
   position: relative;
   justify-self: center;
   align-self: start;
-  width: min(100%, 760px);
+  width: min(100%, 680px);
   padding-top: 2px;
 }
 
@@ -801,11 +815,13 @@ onBeforeUnmount(() => {
 .proof-stage {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.78fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(224px, 238px);
+  gap: 12px;
   align-items: stretch;
   min-height: 0;
   padding: 4px 0 0;
+  max-width: 660px;
+  margin: 0 auto;
 }
 
 .proof-card,
@@ -826,9 +842,11 @@ onBeforeUnmount(() => {
   min-width: 0;
   width: 100%;
   height: 100%;
-  padding: 18px 18px 14px;
+  padding: 14px 14px 12px;
   display: grid;
-  gap: 10px;
+  gap: 7px;
+  justify-items: center;
+  text-align: center;
 }
 
 .muscle-card {
@@ -838,13 +856,16 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   min-height: 0;
-  padding: 12px;
+  padding: 10px 10px 8px;
   display: grid;
-  grid-template-rows: auto 1fr;
-  gap: 8px;
+  grid-template-rows: auto 1fr auto;
+  gap: 5px;
   align-content: stretch;
+  justify-items: center;
+  text-align: center;
   background: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 10px 22px rgba(18, 24, 38, 0.04);
+  box-shadow: 0 8px 18px rgba(18, 24, 38, 0.026);
+  align-self: center;
 }
 
 .muscle-card :deep(.landing-muscle-map),
@@ -866,8 +887,10 @@ onBeforeUnmount(() => {
 .coach-card .card-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  justify-content: start;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
+  justify-items: center;
+  width: 100%;
 }
 
 .card-title,
@@ -875,17 +898,19 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 5px;
   min-width: 0;
+  justify-items: center;
+  text-align: center;
 }
 
 .card-head strong,
 .surface-head strong {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.16;
 }
 
 .coach-card .card-head strong {
-  font-size: 17px;
+  font-size: 16px;
 }
 
 .muscle-head .card-title {
@@ -893,7 +918,7 @@ onBeforeUnmount(() => {
 }
 
 .muscle-head strong {
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .feature-card h3,
@@ -922,6 +947,16 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
+}
+
+.coach-evidence-line {
+  margin: 0;
+  color: var(--landing-muted);
+  font-size: 9.25px;
+  line-height: 1.28;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  opacity: 0.62;
 }
 
 .badge-coral,
@@ -964,46 +999,52 @@ onBeforeUnmount(() => {
 .coach-summary,
 .recommendation-summary {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.48;
+  font-size: 12px;
+  line-height: 1.46;
   color: var(--landing-muted);
 }
 
 .coach-summary {
-  max-width: 280px;
+  max-width: 292px;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.46;
 }
 
 .coach-recommendations,
 .recommendation-stack {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .coach-recommendations,
 .coach-proof {
-  max-width: 280px;
+  max-width: 286px;
 }
 
 .coach-block,
 .recommendation-item {
   border: 1px solid var(--landing-border);
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fcfdff;
-  padding: 10px 11px;
+  padding: 5px 6px;
   display: grid;
-  gap: 4px;
+  gap: 3px;
+  justify-items: center;
+  text-align: center;
+  width: min(100%, 300px);
 }
 
 .coach-block strong,
 .recommendation-item strong {
-  font-size: 13px;
+  font-size: 11.5px;
   line-height: 1.3;
 }
 
 .coach-block p,
 .recommendation-item span {
   margin: 0;
-  font-size: 12px;
+  font-size: 10.5px;
   line-height: 1.4;
   color: var(--landing-muted);
 }
@@ -1024,42 +1065,47 @@ onBeforeUnmount(() => {
 .recommendation-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  text-align: center;
 }
 
 .coach-proof span,
 .recommendation-foot span {
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1.45;
   color: var(--landing-muted);
+  opacity: 0.8;
 }
 
 .coach-proof strong,
 .recommendation-foot strong {
-  font-size: 12px;
+  font-size: 9.5px;
   line-height: 1.2;
+  color: var(--landing-muted);
 }
 
 .muscle-proof-note {
   margin: 0;
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1.4;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--landing-muted);
   text-align: center;
+  opacity: 0.64;
 }
 
 .landing-section {
-  padding-top: 68px;
+  padding-top: 56px;
 }
 
 .section-head {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   max-width: 740px;
-  margin-bottom: 22px;
+  margin-bottom: 18px;
 }
 
 .features-head {
@@ -1089,12 +1135,12 @@ onBeforeUnmount(() => {
 }
 
 .features-head .section-subtitle {
-  max-width: 760px;
+  max-width: 720px;
 }
 
 .preview-head .section-subtitle,
 .secondary-section-head .section-subtitle {
-  max-width: 760px;
+  max-width: 720px;
 }
 
 .feature-grid,
@@ -1105,16 +1151,18 @@ onBeforeUnmount(() => {
 
 .feature-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  max-width: 1040px;
+  gap: 11px;
+  max-width: 960px;
   margin-inline: auto;
 }
 
 .feature-card {
-  min-height: 184px;
-  padding: 18px;
+  min-height: 130px;
+  padding: 11px;
   display: grid;
-  gap: 11px;
+  gap: 7px;
+  justify-items: center;
+  text-align: center;
 }
 
 .feature-icon {
@@ -1157,26 +1205,32 @@ onBeforeUnmount(() => {
 
 .feature-card p {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.54;
+  font-size: 12.5px;
+  line-height: 1.42;
   color: var(--landing-muted);
+  max-width: 26ch;
 }
 
 .preview-section {
   display: grid;
-  gap: 24px;
+  gap: 20px;
 }
 
 .proof-row {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 24px;
+  gap: 20px;
   align-items: center;
 }
 
 .proof-row-alt {
   grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
-  gap: clamp(34px, 4.6vw, 62px);
+  gap: clamp(28px, 4vw, 52px);
+}
+
+.proof-row-progress {
+  grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
+  gap: clamp(28px, 4vw, 52px);
 }
 
 .proof-row-guidance {
@@ -1185,7 +1239,7 @@ onBeforeUnmount(() => {
 
 .proof-copy {
   display: grid;
-  gap: 9px;
+  gap: 8px;
   align-content: start;
   max-width: 36rem;
 }
@@ -1207,7 +1261,7 @@ onBeforeUnmount(() => {
 
 .proof-copy h3 {
   margin: 0;
-  font-size: clamp(23px, 2.3vw, 30px);
+  font-size: clamp(22px, 2.2vw, 28px);
   line-height: 1.12;
 }
 
@@ -1222,23 +1276,23 @@ onBeforeUnmount(() => {
 
 .ai-guidance-cluster {
   display: grid;
-  grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(246px, 0.94fr);
+  gap: 12px;
   align-items: stretch;
-  max-width: 660px;
+  max-width: 640px;
   justify-self: end;
 }
 
 .recommendation-card,
 .muscle-surface-card {
-  padding: 18px;
+  padding: 14px;
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .recommendation-heading strong {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1.16;
 }
 
@@ -1246,15 +1300,12 @@ onBeforeUnmount(() => {
   align-self: stretch;
   justify-self: stretch;
   height: 100%;
-  padding: 14px;
+  min-height: 304px;
+  padding: 16px;
   grid-template-rows: auto 1fr;
-  gap: 10px;
+  gap: 13px;
   border-radius: 20px;
   box-shadow: var(--landing-shadow-soft);
-}
-
-.chat-proof-card :deep(.chat-head) {
-  align-items: flex-start;
 }
 
 .chat-proof-card :deep(.chat-eyebrow),
@@ -1265,49 +1316,34 @@ onBeforeUnmount(() => {
 }
 
 .chat-proof-card :deep(.chat-head strong) {
-  font-size: 15px;
-}
-
-.chat-proof-card :deep(.chat-status) {
-  min-height: 26px;
-  padding: 0 9px;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .chat-proof-card :deep(.chat-body) {
-  gap: 8px;
+  gap: 9px;
+  align-content: center;
 }
 
 .chat-proof-card :deep(.chat-message) {
-  padding: 10px 11px;
-  border-radius: 14px;
+  padding: 9px 10px;
+  border-radius: 13px;
 }
 
 .chat-proof-card :deep(.chat-message p) {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.42;
 }
 
-.chat-proof-card :deep(.assistant-tags) {
-  gap: 5px;
-}
-
-.chat-proof-card :deep(.assistant-tags span) {
-  min-height: 22px;
-  padding: 0 8px;
-  font-size: 10px;
-}
-
 .muscle-surface-card {
-  max-width: 680px;
+  max-width: 620px;
   justify-self: end;
 }
 
 .system-proof-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.88fr) minmax(0, 1.12fr);
-  gap: 14px;
-  max-width: 760px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  max-width: 668px;
   justify-self: end;
   align-items: stretch;
 }
@@ -1327,13 +1363,13 @@ onBeforeUnmount(() => {
 
 .analytics-proof-card.analytics-mockup,
 .nutrition-proof-card.nutrition-mockup {
-  padding: 16px;
-  gap: 14px;
+  padding: 14px;
+  gap: 12px;
 }
 
 .analytics-proof-card :deep(.analytics-head strong),
 .nutrition-proof-card :deep(.nutrition-head strong) {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .analytics-proof-card :deep(.analytics-range span),
@@ -1349,19 +1385,22 @@ onBeforeUnmount(() => {
 }
 
 .analytics-proof-card :deep(.analytics-grid) {
-  gap: 8px;
+  gap: 7px;
 }
 
 .analytics-proof-card :deep(.analytics-stat),
 .nutrition-proof-card :deep(.meal-tab),
 .nutrition-proof-card :deep(.meal-log-card),
-.nutrition-proof-card :deep(.add-food-card),
 .nutrition-proof-card :deep(.trend-pill) {
   border-radius: 16px;
 }
 
 .analytics-proof-card :deep(.analytics-stat) {
   padding: 10px;
+}
+
+.analytics-proof-card :deep(.analytics-stat-wide) {
+  grid-column: 1 / -1;
 }
 
 .analytics-proof-card :deep(.analytics-stat span),
@@ -1378,21 +1417,24 @@ onBeforeUnmount(() => {
 }
 
 .analytics-proof-card :deep(.analytics-stat strong) {
-  font-size: 23px;
+  font-size: 22px;
 }
 
-.analytics-proof-card :deep(.analytics-action) {
-  padding: 12px;
+.analytics-proof-card :deep(.analytics-stat-wide strong) {
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.analytics-proof-card :deep(.analytics-note) {
+  padding: 10px 12px;
   border-radius: 16px;
 }
 
-.analytics-proof-card :deep(.analytics-action strong) {
-  font-size: 15px;
+.analytics-proof-card :deep(.analytics-note strong) {
+  font-size: 14px;
 }
 
-.analytics-proof-card :deep(.action-chip) {
-  min-height: 28px;
-  padding: 0 10px;
+.analytics-proof-card :deep(.analytics-note span) {
   font-size: 11px;
 }
 
@@ -1414,24 +1456,11 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
-.nutrition-proof-card :deep(.meal-log-card),
-.nutrition-proof-card :deep(.add-food-card) {
+.nutrition-proof-card :deep(.meal-log-card) {
   padding: 12px;
 }
 
-.nutrition-proof-card :deep(.add-food-tabs span) {
-  min-height: 28px;
-  padding: 0 10px;
-  font-size: 11px;
-}
-
-.nutrition-proof-card :deep(.search-field) {
-  min-height: 38px;
-  font-size: 12px;
-}
-
-.nutrition-proof-card :deep(.meal-entry),
-.nutrition-proof-card :deep(.search-result) {
+.nutrition-proof-card :deep(.meal-entry) {
   padding: 10px;
   border-radius: 14px;
 }
@@ -1448,38 +1477,46 @@ onBeforeUnmount(() => {
   font-size: 14px;
 }
 
+.review-board-card.review-board {
+  justify-self: start;
+  width: 100%;
+  max-width: 620px;
+}
+
 .how-section {
-  padding-top: 52px;
+  padding-top: 42px;
 }
 
 .secondary-section-head {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .steps-grid {
   position: relative;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: 9px;
 }
 
 .steps-grid::before {
   content: '';
   position: absolute;
-  left: 9%;
-  right: 9%;
-  top: 16px;
+  left: 11%;
+  right: 11%;
+  top: 14px;
   height: 1px;
-  background: linear-gradient(90deg, rgba(75, 123, 255, 0.08), rgba(75, 123, 255, 0.18), rgba(75, 123, 255, 0.08));
+  background: linear-gradient(90deg, rgba(75, 123, 255, 0.05), rgba(75, 123, 255, 0.14), rgba(75, 123, 255, 0.05));
   pointer-events: none;
 }
 
 .step-card {
   position: relative;
   z-index: 1;
-  min-height: 148px;
-  padding: 14px 15px 13px;
+  min-height: 109px;
+  padding: 10px 12px;
   display: grid;
-  gap: 7px;
+  gap: 5px;
+  justify-items: center;
+  text-align: center;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: var(--landing-shadow-soft);
 }
@@ -1488,61 +1525,102 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 17px;
+  height: 17px;
   border-radius: 999px;
   background: rgba(75, 123, 255, 0.08);
   color: var(--landing-blue);
-  font-size: 11px;
+  font-size: 8.5px;
   font-weight: 700;
+  justify-self: start;
 }
 
 .step-card h3 {
-  font-size: 15px;
+  font-size: 13px;
   line-height: 1.22;
 }
 
 .step-card p {
-  max-width: 24ch;
-  font-size: 15px;
-  line-height: 1.55;
+  max-width: 22ch;
+  font-size: 13px;
+  line-height: 1.4;
+  margin-inline: auto;
 }
 
 .landing-footer {
-  padding: 8px 0 22px;
+  padding: 0 0 16px;
 }
 
 .footer-shell {
   display: grid;
-  gap: 5px;
-  padding-top: 6px;
+  gap: 3px;
+  padding-top: 8px;
   border-top: 1px solid var(--landing-border);
 }
 
 .footer-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
 }
 
-.footer-brand .brand-logo {
-  width: 62px;
+.footer-brand-block {
+  display: grid;
+  gap: 2px;
+}
+
+.footer-brand {
+  gap: 6px;
+}
+
+.footer-brand-logo {
+  width: 22px;
+  border-radius: 6px;
+}
+
+.footer-brand .brand-copy {
+  gap: 0;
+}
+
+.footer-brand .brand-copy strong {
+  font-size: 10px;
+}
+
+.footer-brand .brand-copy span:last-child {
+  font-size: 9px;
+}
+
+.footer-description {
+  margin: 0;
+  max-width: 23ch;
+  color: var(--landing-muted);
+  font-size: 11px;
+  line-height: 1.36;
 }
 
 .footer-note {
   margin: 0;
   color: var(--landing-muted);
   font-size: 10px;
-  line-height: 1.45;
-  max-width: 420px;
+  line-height: 1.42;
+  max-width: 320px;
+  opacity: 0.82;
 }
 
 .footer-links a {
   text-decoration: none;
   color: var(--landing-muted);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.footer-link-action {
+  color: var(--landing-text) !important;
+}
+
+.footer-link-legal {
+  color: var(--landing-muted) !important;
 }
 
 .anchor-section {
@@ -1581,14 +1659,15 @@ onBeforeUnmount(() => {
   }
 
   .muscle-card {
-    width: min(100%, 280px);
+    width: min(100%, 292px);
     min-height: 0;
     justify-self: end;
   }
 
   .ai-guidance-cluster,
   .muscle-surface-card,
-  .system-proof-grid {
+  .system-proof-grid,
+  .review-board-card.review-board {
     justify-self: stretch;
     max-width: none;
   }
@@ -1619,7 +1698,7 @@ onBeforeUnmount(() => {
   }
 
   .landing-section {
-    padding-top: 60px;
+    padding-top: 54px;
   }
 
   .hero-section {
@@ -1634,6 +1713,10 @@ onBeforeUnmount(() => {
   .chat-proof-card {
     max-width: none;
     justify-self: stretch;
+  }
+
+  .proof-row-progress {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1658,8 +1741,8 @@ onBeforeUnmount(() => {
   }
 
   .hero-copy h1 {
-    max-width: 13.1ch;
-    font-size: clamp(32px, 9.6vw, 40px);
+    max-width: 14.4ch;
+    font-size: clamp(28px, 8.4vw, 36px);
   }
 
   .features-head h2 {

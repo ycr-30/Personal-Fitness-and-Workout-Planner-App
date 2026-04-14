@@ -20,18 +20,28 @@
     </section>
 
     <section>
-      <h2>Who operates the service</h2>
+      <h2>Who operates the service and acts as data controller</h2>
       <p>
-        Fitness AI Planner is operated directly by the developer responsible for the service
-        and the related account, logging, analytics, and AI guidance infrastructure. For
-        privacy questions, legal notices, access requests, deletion requests, correction
-        requests, complaints, and other data protection issues, contact:
+        For privacy and data-protection purposes, the individual developer who operates
+        Fitness AI Planner is the controller of the personal information described in this
+        policy. The service, its account system, logging tools, analytics features, and AI
+        guidance features are operated through that controller.
+      </p>
+      <p>
+        The primary published contact channel for privacy questions, legal notices, access
+        requests, deletion requests, correction requests, complaints, and other data
+        protection issues is:
         <strong>13957075669@139.com</strong>
       </p>
       <p>
         The service is offered on an internet basis and may be accessed from multiple
         countries or regions. Privacy rights and mandatory disclosures may therefore vary
         depending on the law that applies to a particular user.
+      </p>
+      <p>
+        A separate public mailing address is not currently published for this launch version.
+        Privacy and legal requests are handled through the contact channel above unless a
+        different contact path is later published.
       </p>
     </section>
 
@@ -108,6 +118,13 @@
         persistence, and reliability. They are not described here as advertising cookies or
         behavioral-tracking tools.
       </p>
+      <p>
+        Based on the current launch implementation, Fitness AI Planner does not currently use
+        third-party advertising cookies, cross-site tracking pixels, consumer marketing
+        analytics SDKs, or third-party error-monitoring tools that profile users across other
+        sites or apps. If product analytics, diagnostics, or similar tools are introduced
+        later, this policy should be updated before or at the time those tools are enabled.
+      </p>
     </section>
 
     <section>
@@ -145,8 +162,9 @@
       <p>
         Because this data can reveal physical condition, health-adjacent routines, injuries,
         restrictions, or personal goals, Fitness AI Planner aims to apply tighter access
-        control, narrower use limitations, and higher care expectations to this category of
-        information than it would apply to ordinary marketing or website telemetry data.
+        control, narrower use limitations, data minimization, and higher care expectations to
+        this category of information than it would apply to ordinary marketing or website
+        telemetry data.
       </p>
       <p>
         Users should enter only information they are comfortable storing in the service and
@@ -205,6 +223,7 @@
         <li>account profile, planning, workout, body, nutrition, hydration, settings, and AI conversation records are generally retained while your account remains active and until deletion is requested or completed</li>
         <li>authenticated session cookies remain active until expiry, sign-out, or cookie clearing, with current session tokens configured for up to 7 days</li>
         <li>verification, password reset, abuse prevention, and operational security records may be retained for shorter limited periods needed to secure the service and investigate misuse</li>
+        <li>support, privacy, legal-notice, and account-request correspondence may be retained for the period reasonably needed to respond, document the request, protect accounts, and comply with legal or recordkeeping obligations</li>
         <li>some residual copies may remain temporarily in backups, logs, or recovery systems after account deletion, after which they should age out according to operational retention controls</li>
       </ul>
       <p>
@@ -237,12 +256,17 @@
         <li>complain to a regulator or supervisory authority where applicable</li>
       </ul>
       <p>
-        Fitness AI Planner already offers certain in-app account controls, including data
-        export and account deletion tools in account settings where those features are
-        available. You may also correct some account details directly in profile or settings
-        flows. If you want to request access, correction, deletion, restriction, objection,
-        export, or another privacy-related action, you can use available in-app controls or
-        email <strong>13957075669@139.com</strong>.
+        Depending on the feature, your account state, and what is currently supported in the
+        product, Fitness AI Planner may offer certain in-app controls, including profile or
+        settings updates and, where available, data export or account deletion tools. If you
+        want to request access, correction, deletion, restriction, objection, export, or
+        another privacy-related action, you can use available in-app controls where available
+        or email <strong>13957075669@139.com</strong>.
+      </p>
+      <p>
+        If you contact Fitness AI Planner by email to exercise one of these rights, include
+        the email address associated with your account and describe the action you want to
+        take so the request can be reviewed more efficiently.
       </p>
       <p>
         To protect user accounts, Fitness AI Planner may ask you to verify your identity before
@@ -288,7 +312,8 @@
       <h2>Contact for privacy questions</h2>
       <p>
         For privacy questions, deletion requests, access requests, correction requests, or
-        other personal data concerns, contact:
+        other personal data concerns, contact the controller of Fitness AI Planner through the
+        primary published privacy channel:
         <strong>13957075669@139.com</strong>
       </p>
     </section>
