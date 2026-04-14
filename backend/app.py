@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import re
@@ -67,6 +68,13 @@ class NutritionFoodEstimateReq(BaseModel):
     use_rag: bool = False
 
 
+class AnalyticsInsightReq(BaseModel):
+    summary: dict[str, Any] | None = None
+    range_days: int | None = None
+    snapshot_version: str | None = None
+    user_profile: dict[str, Any] | None = None
+
+
 def _parse_cors_origins() -> list[str]:
     raw = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:4000")
     return [item.strip() for item in raw.split(",") if item.strip()]
@@ -126,6 +134,196 @@ def _extract_external_evidence(req: ChatReq) -> list[dict[str, Any]]:
 
 def _contains_cjk(text: str) -> bool:
     return bool(CJK_RE.search(text or ""))
+
+
+ANALYTICS_DIRTY_RE = re.compile(
+    r"\b(?:WORKOUT ADVICE|NUTRITION ADVICE|Draft response|Key conclusions?|"
+    r"Risks?\s*/\s*bottlenecks?|Next\s*7[- ]day action plan|Sources?)\b",
+    re.I,
+)
+
+
+def _extract_json_payload(text: str) -> dict[str, Any] | None:
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if "\n" in raw:
+            raw = raw.split("\n", 1)[1]
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return None
+    try:
+        return json.loads(raw[start : end + 1])
+    except Exception:
+        return None
+
+
+def _analytics_clean_text(value: Any) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip().strip("-•\t ")
+    if not text:
+        return ""
+    if ANALYTICS_DIRTY_RE.search(text):
+        return ""
+    return text
+
+
+def _analytics_clean_list(value: Any, limit: int = 3) -> list[str]:
+    if isinstance(value, list):
+        source = value
+    elif isinstance(value, str):
+        source = [line for line in value.splitlines() if line.strip()]
+    else:
+        source = []
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in source:
+        text = _analytics_clean_text(item)
+        if not text:
+            continue
+        marker = text.casefold()
+        if marker in seen:
+            continue
+        seen.add(marker)
+        cleaned.append(text)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _analytics_confidence(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"medium", "high"}:
+        return normalized
+    return "low"
+
+
+def _analytics_number(value: Any, fallback: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        return fallback
+    return parsed if parsed == parsed else fallback
+
+
+def _supports_nutrition_analytics(summary: dict[str, Any]) -> bool:
+    goal = str(((summary or {}).get("goal") or {}).get("primary") or "").strip().lower()
+    if goal not in {"fat-loss", "muscle-gain", "maintenance"}:
+        return False
+
+    nutrition = (summary or {}).get("nutrition") if isinstance(summary, dict) else {}
+    intake_kcal = _analytics_number((nutrition or {}).get("intakeKcal"), 0.0)
+    deficit_kcal = _analytics_number((nutrition or {}).get("deficitKcal"), 0.0)
+    note = _analytics_clean_text((nutrition or {}).get("intakeNote") or "")
+    return intake_kcal > 0 or abs(deficit_kcal) > 0 or bool(note)
+
+
+def _merge_analytics_payloads(
+    workout_payload: dict[str, Any] | None,
+    nutrition_payload: dict[str, Any] | None,
+    range_days: int,
+    snapshot_version: str,
+) -> dict[str, Any] | None:
+    if not workout_payload:
+        return None
+
+    key_insight = _analytics_clean_text(workout_payload.get("keyInsight"))
+    if not key_insight:
+        return None
+
+    risks = _analytics_clean_list(workout_payload.get("risks"), limit=3)
+    next_days = _analytics_clean_list(workout_payload.get("next7Days"), limit=3)
+    confidence = _analytics_confidence(workout_payload.get("confidence"))
+
+    if nutrition_payload:
+        nutrition_risks = _analytics_clean_list(nutrition_payload.get("risks"), limit=2)
+        nutrition_next = _analytics_clean_list(nutrition_payload.get("next7Days"), limit=2)
+
+        for item in nutrition_risks:
+            if item.casefold() not in {entry.casefold() for entry in risks}:
+                risks.append(item)
+            if len(risks) >= 3:
+                break
+
+        for item in nutrition_next:
+            if item.casefold() not in {entry.casefold() for entry in next_days}:
+                next_days.append(item)
+            if len(next_days) >= 3:
+                break
+
+        if confidence == "high" and _analytics_confidence(nutrition_payload.get("confidence")) != "high":
+            confidence = "medium"
+        if _analytics_confidence(nutrition_payload.get("confidence")) == "low":
+            confidence = "low"
+
+    return {
+        "keyInsight": key_insight,
+        "risks": risks[:3],
+        "next7Days": next_days[:3],
+        "confidence": confidence,
+        "insufficientData": False,
+        "basedOn": {
+            "timeRange": f"Last {range_days} days",
+            "snapshotVersion": str(snapshot_version or "").strip(),
+        },
+    }
+
+
+def _build_workout_analytics_prompt(
+    summary: dict[str, Any],
+    range_days: int,
+    snapshot_version: str,
+    user_profile: dict[str, Any] | None = None,
+) -> str:
+    return (
+        "Return valid JSON only with this exact shape:\n"
+        "{\n"
+        '  "keyInsight": "one short paragraph",\n'
+        '  "risks": ["short bullet", "short bullet"],\n'
+        '  "next7Days": ["short action", "short action"],\n'
+        '  "confidence": "low"\n'
+        "}\n\n"
+        "Rules:\n"
+        "- Base every statement strictly on the supplied analytics snapshot.\n"
+        "- Do not invent numbers, dates, goals, or progress that are not present.\n"
+        "- keyInsight: max 1 short paragraph.\n"
+        "- risks: max 3 short bullets.\n"
+        "- next7Days: max 3 short, grounded, quantitative actions.\n"
+        "- Only include workout, recovery, activity, and body-metric observations.\n"
+        "- Do not include nutrition, calories, protein, meal plans, or supplements.\n"
+        "- Do not output markdown, headings, labels, or extra keys.\n\n"
+        f"User profile JSON:\n{json.dumps(user_profile or {}, ensure_ascii=False)}\n\n"
+        f"Analytics summary JSON (Last {range_days} days, snapshot {snapshot_version}):\n"
+        f"{json.dumps(summary or {}, ensure_ascii=False)}"
+    )
+
+
+def _build_nutrition_analytics_prompt(
+    summary: dict[str, Any],
+    range_days: int,
+    snapshot_version: str,
+    user_profile: dict[str, Any] | None = None,
+) -> str:
+    return (
+        "Return valid JSON only with this exact shape:\n"
+        "{\n"
+        '  "risks": ["short bullet"],\n'
+        '  "next7Days": ["short action"],\n'
+        '  "confidence": "low"\n'
+        "}\n\n"
+        "Rules:\n"
+        "- Only include nutrition-specific guidance if the goal and data clearly support it.\n"
+        "- Use only the supplied analytics snapshot.\n"
+        "- Keep every item short, grounded, and quantitative when possible.\n"
+        "- Do not mention workout programming or body-measurement trends.\n"
+        "- risks: max 2 short bullets.\n"
+        "- next7Days: max 2 short actions.\n"
+        "- Do not output markdown, headings, labels, or extra keys.\n\n"
+        f"User profile JSON:\n{json.dumps(user_profile or {}, ensure_ascii=False)}\n\n"
+        f"Analytics summary JSON (Last {range_days} days, snapshot {snapshot_version}):\n"
+        f"{json.dumps(summary or {}, ensure_ascii=False)}"
+    )
 
 
 app.add_middleware(
@@ -210,6 +408,55 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
     }
     response["content"] = merged
     return response
+
+
+@app.post("/analytics/insight")
+def analytics_insight(req: AnalyticsInsightReq, authorization: str | None = Header(default=None)):
+    inbound_api_key = os.getenv("INBOUND_API_KEY", "").strip()
+    if inbound_api_key:
+        expected = f"Bearer {inbound_api_key}"
+        if authorization != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    summary = req.summary or {}
+    range_days = int(req.range_days or 30)
+    range_days = max(7, min(range_days, 180))
+    snapshot_version = str(req.snapshot_version or "").strip()
+    profile = req.user_profile if isinstance(req.user_profile, dict) else None
+
+    try:
+        workout_prompt = _build_workout_analytics_prompt(summary, range_days, snapshot_version, profile)
+        workout_messages = [
+            {"role": "system", "content": WORKOUT_SYSTEM_PROMPT},
+            {"role": "user", "content": workout_prompt},
+        ]
+        workout_raw = manager.generate(workout_messages, adapter="workout")
+        workout_payload = _extract_json_payload(workout_raw)
+        if not workout_payload:
+            return {"route": "analytics_insight", "insight": None, "source": "unavailable"}
+
+        nutrition_payload = None
+        if _supports_nutrition_analytics(summary):
+            nutrition_prompt = _build_nutrition_analytics_prompt(summary, range_days, snapshot_version, profile)
+            nutrition_messages = [
+                {"role": "system", "content": NUTRITION_SYSTEM_PROMPT},
+                {"role": "user", "content": nutrition_prompt},
+            ]
+            nutrition_raw = manager.generate(nutrition_messages, adapter="nutrition")
+            nutrition_payload = _extract_json_payload(nutrition_raw)
+
+        merged = _merge_analytics_payloads(
+            workout_payload,
+            nutrition_payload,
+            range_days,
+            snapshot_version,
+        )
+        if not merged:
+            return {"route": "analytics_insight", "insight": None, "source": "unavailable"}
+
+        return {"route": "analytics_insight", "insight": merged, "source": "analytics_agents"}
+    except Exception:
+        return {"route": "analytics_insight", "insight": None, "source": "unavailable"}
 
 
 @app.post("/nutrition/cards")

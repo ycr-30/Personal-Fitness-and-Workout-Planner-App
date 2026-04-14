@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/auth'
 import { buildNutritionAlerts } from '@/utils/nutritionAlerts'
 import { resolveMealTypeLabel, toDateKey } from '@/utils/mealTimeResolver'
 import { toNumber } from '@/utils/nutritionCalculations'
+import { recordAiAgentRun } from '@/lib/aiAgentMetrics'
 
 const NUTRITION_AI_ORIGIN = import.meta.env.VITE_NUTRITION_AGENT_ORIGIN || 'http://localhost:8000'
 
@@ -71,6 +72,7 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
   let timer = null
 
   async function refreshAI() {
+    const startedAt = Date.now()
     loading.value = true
     error.value = ''
 
@@ -111,18 +113,27 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
       }
 
       const data = await response.json()
-      insightLines.value = Array.isArray(data?.insight)
+      const nextInsightLines = Array.isArray(data?.insight)
         ? data.insight
         : String(data?.insight || '')
             .split('\n')
             .map((line) => line.replace(/^[\-\d\.\s]+/, '').trim())
             .filter(Boolean)
-      recommendationLines.value = Array.isArray(data?.recommendation)
+      const nextRecommendationLines = Array.isArray(data?.recommendation)
         ? data.recommendation
         : String(data?.recommendation || '')
             .split('\n')
             .map((line) => line.replace(/^[\-\d\.\s]+/, '').trim())
             .filter(Boolean)
+      insightLines.value = nextInsightLines
+      recommendationLines.value = nextRecommendationLines
+
+      void recordAiAgentRun({
+        agentType: 'nutrition',
+        success: nextInsightLines.length > 0 || nextRecommendationLines.length > 0,
+        usedFallback: false,
+        latencyMs: Date.now() - startedAt
+      })
     } catch (err) {
       error.value = err.message || 'Unable to load nutrition AI suggestions.'
       insightLines.value = buildInsightFallback(
@@ -131,6 +142,13 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
         goalsValue?.goal_type || 'maintenance'
       )
       recommendationLines.value = buildRecommendationFallback(summaryValue, unref(activeMealType))
+      void recordAiAgentRun({
+        agentType: 'nutrition',
+        success: insightLines.value.length > 0 || recommendationLines.value.length > 0,
+        usedFallback: true,
+        latencyMs: Date.now() - startedAt,
+        errorMessage: err?.message || 'Unable to load nutrition AI suggestions.'
+      })
     } finally {
       loading.value = false
     }

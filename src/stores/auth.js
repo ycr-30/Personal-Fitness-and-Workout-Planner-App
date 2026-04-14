@@ -1,13 +1,72 @@
 // src/stores/auth.js
 import { defineStore } from 'pinia'
+import { supabase } from '@/lib/supabaseClient'
 import { loadUserOnboardingAnswers, normalizeOnboardingAnswers, saveUserOnboardingAnswers } from '@/lib/userOnboardingCloud'
 
 const USERS_KEY = 'pf_users' // 所有注册用户（原型阶段使用浏览器本地存储）
 const CURRENT_KEY = 'pf_current_user' // 当前登录用户的账号键
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/ // 邮箱格式校验
-const USERNAME_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/ // 用户名规则：≥6 且含大小写字母与数字
 const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000' // 鉴权服务地址
 let activeCloudOnboardingIdentity = ''
+
+function normalizeSupabaseAuthMessage(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function normalizeSupabaseMetadataString(value) {
+  return String(value ?? '').trim()
+}
+
+function normalizeSupabaseMetadataNumber(value) {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function splitDisplayName(value = '') {
+  const parts = String(value || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  return {
+    firstName: parts[0] || '',
+    lastName: parts.slice(1).join(' ')
+  }
+}
+
+function buildSupabaseRegistrationMetadata(payload = {}) {
+  const sex = String(payload.sex || '').trim().toLowerCase() === 'male' ? 'male' : 'female'
+  const heightCm = normalizeSupabaseMetadataNumber(payload.height)
+  const weightKg = normalizeSupabaseMetadataNumber(payload.weight)
+
+  return {
+    full_name: normalizeSupabaseMetadataString(payload.name) || null,
+    sex,
+    birthday: normalizeSupabaseMetadataString(payload.birthday) || null,
+    height_cm: heightCm,
+    weight_kg: weightKg
+  }
+}
+
+async function upsertSupabaseRegistrationProfile(user, payload = {}) {
+  if (!supabase || !user?.id) return
+  const metadata = buildSupabaseRegistrationMetadata(payload)
+  const nameParts = splitDisplayName(metadata.full_name || '')
+  const profilePayload = {
+    user_id: user.id,
+    first_name: nameParts.firstName || null,
+    last_name: nameParts.lastName || null,
+    display_name: metadata.full_name || null,
+    sex: metadata.sex || null,
+    birthday: metadata.birthday || null,
+    height_cm: metadata.height_cm,
+    weight_kg: metadata.weight_kg
+  }
+  const { error } = await supabase
+    .from('user_profiles')
+    .upsert(profilePayload, { onConflict: 'user_id' })
+  if (error) throw error
+}
 
 function readUsers() {
   const raw = localStorage.getItem(USERS_KEY)
@@ -109,7 +168,11 @@ export const useAuthStore = defineStore('auth', {
           credentials: 'include'
         })
         if (!res.ok) {
-          if (this.user?.provider) {
+          if (res.status === 401 || res.status === 403) {
+            activeCloudOnboardingIdentity = ''
+            localStorage.removeItem(CURRENT_KEY)
+            this.user = null
+          } else if (this.user?.provider) {
             this.user = null
           }
           return
@@ -126,6 +189,15 @@ export const useAuthStore = defineStore('auth', {
                 null
             }
           })
+          const nextAccountKey =
+            nextUser?.accountKey ||
+            nextUser?.email?.toLowerCase?.() ||
+            nextUser?.account?.toLowerCase?.() ||
+            nextUser?.id ||
+            ''
+          if (nextAccountKey) {
+            localStorage.setItem(CURRENT_KEY, nextAccountKey)
+          }
           cacheUserRecord(nextUser)
           this.user = nextUser
         }
@@ -134,7 +206,26 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async beginLocalRegistration(payload) {
+    async hydrateFromSupabaseSession() {
+      if (!supabase) return null
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (error) {
+          console.error('hydrateFromSupabaseSession failed', error)
+          return null
+        }
+        const sessionUser = data?.session?.user || null
+        if (!sessionUser) return null
+        await this.setUserFromSupabase(sessionUser)
+        await this.syncServerSessionFromSupabase()
+        return sessionUser
+      } catch (err) {
+        console.error('hydrateFromSupabaseSession failed', err)
+        return null
+      }
+    },
+
+    async beginLocalRegistration(payload, { resend = false } = {}) {
       const {
         account,
         name,
@@ -151,15 +242,8 @@ export const useAuthStore = defineStore('auth', {
         this.error = 'Please complete all required fields.'
         return false
       }
-      const trimmedAccount = account.trim()
-      const isEmail = EMAIL_PATTERN.test(trimmedAccount)
-      const isUsername = USERNAME_PATTERN.test(trimmedAccount)
-      if (!isEmail && !isUsername) {
-        this.error = 'Please enter a valid account (email or 6+ chars with upper, lower, digits).'
-        return false
-      }
-      const trimmedEmail = payload.email ? payload.email.trim() : ''
-      if (trimmedEmail && !EMAIL_PATTERN.test(trimmedEmail)) {
+      const trimmedEmail = account.trim()
+      if (!EMAIL_PATTERN.test(trimmedEmail)) {
         this.error = 'Please enter a valid email address.'
         return false
       }
@@ -178,39 +262,89 @@ export const useAuthStore = defineStore('auth', {
         this.error = 'Height and weight must be valid numbers.'
         return false
       }
+      if (!supabase) {
+        this.error = 'Supabase auth is not configured.'
+        return null
+      }
 
       this.loading = true
       try {
-        const response = await fetch(`${AUTH_SERVER_ORIGIN}/auth/local/send-verification`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            account: trimmedAccount,
-            email: trimmedEmail || (isEmail ? trimmedAccount : ''),
-            name,
-            password,
-            sex: normalizedSex,
-            birthday,
-            height: numericHeight,
-            weight: numericWeight,
-            avatarData: avatarData || ''
-          })
+        const registrationMetadata = buildSupabaseRegistrationMetadata({
+          name,
+          sex: normalizedSex,
+          birthday,
+          height: numericHeight,
+          weight: numericWeight,
+          avatarData
         })
-        const data = await response.json().catch(() => ({}))
-        if (!response.ok) {
-          this.error = data?.error || 'Failed to create verification state.'
-          return null
+
+        if (resend) {
+          const { error } = await supabase.auth.resend({
+            type: 'signup',
+            email: trimmedEmail,
+            options: {
+              emailRedirectTo: `${window.location.origin}/register?mode=confirm`
+            }
+          })
+          if (error) {
+            this.error = error.message || 'Failed to resend verification code.'
+            return null
+          }
+        } else {
+          const { data, error } = await supabase.auth.signUp({
+            email: trimmedEmail,
+            password,
+            options: {
+              emailRedirectTo: `${window.location.origin}/register?mode=confirm`,
+              data: registrationMetadata
+            }
+          })
+          if (error) {
+            const normalizedMessage = normalizeSupabaseAuthMessage(error.message)
+            if (normalizedMessage.includes('already registered')) {
+              this.error = 'An account with this email already exists. Sign in or reset your password.'
+            } else {
+              this.error = error.message || 'Failed to create verification state.'
+            }
+            return null
+          }
+
+          const authedUser = data?.session?.user || data?.user || null
+          const isAlreadyVerified = Boolean(data?.session?.access_token || authedUser?.email_confirmed_at)
+          if (authedUser?.id && isAlreadyVerified) {
+            await this.setUserFromSupabase(authedUser)
+            await this.syncServerSessionFromSupabase()
+            try {
+              await upsertSupabaseRegistrationProfile(authedUser, {
+                name,
+                sex: normalizedSex,
+                birthday,
+                height: numericHeight,
+                weight: numericWeight,
+                avatarData: avatarData || ''
+              })
+            } catch (profileError) {
+              console.error('Supabase registration profile seed failed', profileError)
+            }
+            return {
+              ok: true,
+              verified: true,
+              deliveryTarget: trimmedEmail,
+              resendIn: 60,
+              notice: 'Account created.'
+            }
+          }
         }
         return {
           ok: true,
-          deliveryTarget: data?.deliveryTarget || trimmedEmail || trimmedAccount,
-          expiresIn: Number(data?.expiresIn || 60),
-          debugCode: data?.debugCode || '',
-          notice: data?.notice || ''
+          deliveryTarget: trimmedEmail,
+          resendIn: 60,
+          expiresIn: 60,
+          debugCode: '',
+          notice: resend ? 'Verification code resent.' : 'Verification code sent.'
         }
       } catch (err) {
-        console.error('beginLocalRegistration failed', err)
+        console.error('beginSupabaseRegistration failed', err)
         this.error = 'Failed to create verification state.'
         return null
       } finally {
@@ -218,43 +352,79 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async confirmLocalRegistration({ account, code }) {
-      const trimmedAccount = account?.trim?.() || ''
+    async confirmLocalRegistration({ account, code, profile = null }) {
+      const trimmedEmail = account?.trim?.() || ''
       const trimmedCode = code?.trim?.() || ''
       this.error = null
-      if (!trimmedAccount || !trimmedCode) {
-        this.error = 'Account and verification code are required.'
+      if (!trimmedEmail || !trimmedCode) {
+        this.error = 'Email and verification code are required.'
+        return false
+      }
+      if (!EMAIL_PATTERN.test(trimmedEmail)) {
+        this.error = 'Please enter a valid email address.'
+        return false
+      }
+      if (!/^\d{6}$/.test(trimmedCode)) {
+        this.error = 'Please enter a valid 6-digit verification code.'
+        return false
+      }
+      if (!supabase) {
+        this.error = 'Supabase auth is not configured.'
         return false
       }
 
       this.loading = true
       try {
-        const response = await fetch(`${AUTH_SERVER_ORIGIN}/auth/local/confirm-registration`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            account: trimmedAccount,
-            code: trimmedCode
-          })
+        const { data, error } = await supabase.auth.verifyOtp({
+          email: trimmedEmail,
+          token: trimmedCode,
+          type: 'signup'
         })
-        const data = await response.json().catch(() => ({}))
-        if (!response.ok) {
-          this.error = data?.error || 'Failed to complete registration.'
+        if (error) {
+          const normalizedMessage = normalizeSupabaseAuthMessage(error.message)
+          if (normalizedMessage.includes('expired')) {
+            this.error = 'Verification code expired. Please resend.'
+          } else {
+            this.error = error.message || 'Failed to complete registration.'
+          }
           return false
         }
-        if (data?.user) {
-          const nextUser = pickUserSnapshot(data.user)
-          cacheUserRecord(nextUser)
-          localStorage.setItem(
-            CURRENT_KEY,
-            nextUser.accountKey || nextUser.account?.toLowerCase?.() || nextUser.email?.toLowerCase?.() || trimmedAccount.toLowerCase()
-          )
-          this.user = nextUser
+        const metadata = buildSupabaseRegistrationMetadata(profile || {})
+        const authUser = data?.user || data?.session?.user || null
+        let sessionUser = authUser
+
+        if (authUser?.id && profile) {
+          const { data: updatedData, error: updateError } = await supabase.auth.updateUser({
+            data: metadata
+          })
+          if (updateError) {
+            console.error('Supabase registration metadata sync failed', updateError)
+          } else if (updatedData?.user?.id) {
+            sessionUser = updatedData.user
+          }
+        }
+
+        if (!sessionUser?.id) {
+          const { data: userData, error: userError } = await supabase.auth.getUser()
+          if (userError || !userData?.user?.id) {
+            this.error = 'Failed to complete registration.'
+            return false
+          }
+          sessionUser = userData.user
+        }
+
+        await this.setUserFromSupabase(sessionUser)
+        await this.syncServerSessionFromSupabase()
+        if (profile) {
+          try {
+            await upsertSupabaseRegistrationProfile(sessionUser, profile)
+          } catch (profileError) {
+            console.error('Supabase registration profile seed failed', profileError)
+          }
         }
         return true
       } catch (err) {
-        console.error('confirmLocalRegistration failed', err)
+        console.error('confirmSupabaseRegistration failed', err)
         this.error = 'Failed to complete registration.'
         return false
       } finally {
@@ -266,49 +436,195 @@ export const useAuthStore = defineStore('auth', {
       this.error = null
       const trimmedIdentifier = identifier?.trim?.() || ''
       if (!trimmedIdentifier && !password) {
-        this.error = 'Account and password are required.'
+        this.error = 'Email and password are required.'
         return false
       }
-      if (!trimmedIdentifier) {
-        this.error = 'Account is required.'
+      if (!EMAIL_PATTERN.test(trimmedIdentifier)) {
+        this.error = 'Please enter a valid email address.'
         return false
       }
       if (!password) {
         this.error = 'Password is required.'
         return false
       }
+      if (!supabase) {
+        this.error = 'Supabase auth is not configured.'
+        return false
+      }
       this.loading = true
       try {
-        const response = await fetch(`${AUTH_SERVER_ORIGIN}/auth/local/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            identifier: trimmedIdentifier,
-            password
-          })
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: trimmedIdentifier,
+          password
         })
-        const data = await response.json().catch(() => ({}))
-        if (!response.ok || !data?.user) {
-          this.error = data?.error || 'Incorrect account or password.'
+        if (error || !data?.user) {
+          this.error = error?.message || 'Incorrect email or password.'
           return false
         }
-        const nextUser = pickUserSnapshot(data.user)
-        cacheUserRecord(nextUser)
+        await this.setUserFromSupabase(data.user)
+        await this.syncServerSessionFromSupabase()
         if (remember) {
-          localStorage.setItem(
-            CURRENT_KEY,
-            nextUser.accountKey || nextUser.account?.toLowerCase?.() || nextUser.email?.toLowerCase?.() || trimmedIdentifier.toLowerCase()
-          )
+          localStorage.setItem(CURRENT_KEY, trimmedIdentifier.toLowerCase())
         } else {
           localStorage.removeItem(CURRENT_KEY)
         }
-        this.user = nextUser
         return true
       } catch (err) {
-        console.error('local login failed', err)
+        console.error('Supabase password login failed', err)
         this.error = 'Failed to log in.'
         return false
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async sendPasswordResetCode(email) {
+      this.error = null
+      const trimmedEmail = email?.trim?.() || ''
+      if (!EMAIL_PATTERN.test(trimmedEmail)) {
+        this.error = 'Invalid email address'
+        return null
+      }
+      if (!supabase) {
+        this.error = 'Supabase auth is not configured.'
+        return null
+      }
+
+      this.loading = true
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+          redirectTo: `${window.location.origin}/login?mode=recovery`
+        })
+        if (error) {
+          this.error = error.message || 'Failed to send verification code.'
+          return null
+        }
+        return {
+          success: true,
+          message: 'If an account exists for this email, a verification code has been sent.',
+          resendIn: 60
+        }
+      } catch (err) {
+        console.error('sendPasswordResetCode failed', err)
+        this.error = 'Failed to send verification code.'
+        return null
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async verifyPasswordResetCode({ email, code }) {
+      this.error = null
+      const trimmedEmail = email?.trim?.() || ''
+      const trimmedCode = code?.trim?.() || ''
+      if (!EMAIL_PATTERN.test(trimmedEmail)) {
+        this.error = 'Invalid email address'
+        return null
+      }
+      if (!/^\d{6}$/.test(trimmedCode)) {
+        this.error = 'Invalid verification code'
+        return null
+      }
+      if (!supabase) {
+        this.error = 'Supabase auth is not configured.'
+        return null
+      }
+
+      this.loading = true
+      try {
+        const { data, error } = await supabase.auth.verifyOtp({
+          email: trimmedEmail,
+          token: trimmedCode,
+          type: 'recovery'
+        })
+        if (error) {
+          const normalizedMessage = normalizeSupabaseAuthMessage(error.message)
+          if (normalizedMessage.includes('expired')) {
+            this.error = 'Verification code expired'
+          } else {
+            this.error = 'Invalid verification code'
+          }
+          return null
+        }
+        const sessionUser = data?.session?.user || null
+        if (!sessionUser?.id) {
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+          if (sessionError || !sessionData?.session?.user?.id) {
+            this.error = 'Recovery session expired. Please request a new code.'
+            return null
+          }
+          return {
+            success: true,
+            email: sessionData.session.user.email || trimmedEmail
+          }
+        }
+        return {
+          success: true,
+          email: sessionUser.email || trimmedEmail
+        }
+      } catch (err) {
+        console.error('verifyPasswordResetCode failed', err)
+        this.error = 'Failed to verify code.'
+        return null
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async confirmPasswordReset({ email, newPassword, confirmPassword }) {
+      this.error = null
+      if (!newPassword || newPassword.length < 6) {
+        this.error = 'Password must meet minimum security requirements'
+        return null
+      }
+      if (newPassword !== confirmPassword) {
+        this.error = 'Passwords do not match'
+        return null
+      }
+      if (!supabase) {
+        this.error = 'Supabase auth is not configured.'
+        return null
+      }
+
+      this.loading = true
+      try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError || !sessionData?.session?.user?.id) {
+          this.error = 'Recovery session expired. Please request a new code.'
+          return null
+        }
+        const { error } = await supabase.auth.updateUser({
+          password: newPassword
+        })
+        if (error) {
+          this.error = error.message || 'Failed to update password.'
+          return null
+        }
+        try {
+          await supabase.auth.signOut()
+        } catch (signOutError) {
+          console.error('Supabase signOut after password reset failed', signOutError)
+        }
+        try {
+          await fetch(`${AUTH_SERVER_ORIGIN}/logout`, {
+            method: 'POST',
+            credentials: 'include'
+          })
+        } catch (logoutError) {
+          console.error('Backend logout after password reset failed', logoutError)
+        }
+        activeCloudOnboardingIdentity = ''
+        localStorage.removeItem(CURRENT_KEY)
+        this.user = null
+        return {
+          success: true,
+          message: 'Password updated. You can now sign in with your new password.',
+          email: sessionData.session.user.email || email?.trim?.() || ''
+        }
+      } catch (err) {
+        console.error('confirmPasswordReset failed', err)
+        this.error = 'Failed to update password.'
+        return null
       } finally {
         this.loading = false
       }
@@ -349,37 +665,74 @@ export const useAuthStore = defineStore('auth', {
       return true
     },
 
+    async syncServerSessionFromSupabase() {
+      if (!supabase) return false
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (error) throw error
+        const accessToken = data?.session?.access_token || ''
+        if (!accessToken) return false
+
+        const response = await fetch(`${AUTH_SERVER_ORIGIN}/auth/supabase/session`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          },
+          credentials: 'include'
+        })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(payload?.error || 'Failed to sync backend session.')
+        }
+        return true
+      } catch (err) {
+        console.error('syncServerSessionFromSupabase failed', err)
+        return false
+      }
+    },
+
     async setUserFromSupabase(user) {
       if (!user) return false
+      const metadata = user.user_metadata && typeof user.user_metadata === 'object' ? user.user_metadata : {}
       const email = user.email || ''
       const accountKey = email.toLowerCase() || user.id
       const users = readUsers()
-      if (!users[accountKey]) {
-        users[accountKey] = {
-          id: user.id,
-          account: email || user.id,
-          accountKey,
-          email,
-          name: user.user_metadata?.full_name || email.split('@')[0] || 'User',
-          password: '',
-          sex: 'female',
-          birthday: '',
-          height: '',
-          weight: '',
-          bodyFat: null,
-          avatar: user.user_metadata?.avatar_url || '',
-          theme: 'light',
-          onboarding: { completed: false, answers: null }
-        }
-        writeUsers(users)
-      } else if (!users[accountKey].id && user.id) {
-        users[accountKey] = { ...users[accountKey], id: user.id }
-        writeUsers(users)
+      const existing = users[accountKey] || {}
+      const nextHeight = normalizeSupabaseMetadataNumber(metadata.height_cm ?? metadata.height)
+      const nextWeight = normalizeSupabaseMetadataNumber(metadata.weight_kg ?? metadata.weight)
+      const nextBirthday = normalizeSupabaseMetadataString(metadata.birthday) || existing.birthday || ''
+      const nextSexRaw = normalizeSupabaseMetadataString(metadata.sex).toLowerCase()
+      const nextSex = nextSexRaw === 'male' ? 'male' : nextSexRaw === 'female' ? 'female' : existing.sex || 'female'
+      const nextName =
+        normalizeSupabaseMetadataString(metadata.full_name || metadata.name) ||
+        existing.name ||
+        email.split('@')[0] ||
+        'User'
+      const nextAvatar = normalizeSupabaseMetadataString(metadata.avatar_url) || existing.avatar || ''
+      const merged = {
+        ...existing,
+        id: user.id,
+        account: email || existing.account || user.id,
+        accountKey,
+        email,
+        name: nextName,
+        password: '',
+        sex: nextSex,
+        birthday: nextBirthday,
+        height: nextHeight ?? existing.height ?? '',
+        weight: nextWeight ?? existing.weight ?? '',
+        bodyFat: calculateBodyFat({
+          heightCm: nextHeight ?? existing.height ?? null,
+          weightKg: nextWeight ?? existing.weight ?? null,
+          birthday: nextBirthday,
+          sex: nextSex
+        }),
+        avatar: nextAvatar,
+        theme: existing.theme || 'light',
+        onboarding: existing.onboarding || { completed: false, answers: null }
       }
-      if (!users[accountKey].theme) {
-        users[accountKey].theme = 'light'
-        writeUsers(users)
-      }
+      users[accountKey] = merged
+      writeUsers(users)
       localStorage.setItem(CURRENT_KEY, accountKey)
       const nextUser = pickUserSnapshot(users[accountKey])
       cacheUserRecord(nextUser)
@@ -398,6 +751,13 @@ export const useAuthStore = defineStore('auth', {
         })
       } catch (err) {
         console.error('logout request failed', err)
+      }
+      if (supabase) {
+        try {
+          await supabase.auth.signOut()
+        } catch (err) {
+          console.error('Supabase logout failed', err)
+        }
       }
       activeCloudOnboardingIdentity = ''
       localStorage.removeItem(CURRENT_KEY)

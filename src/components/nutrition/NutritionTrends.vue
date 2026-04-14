@@ -19,8 +19,8 @@
       </div>
     </div>
 
-    <div v-if="loading" class="state">Loading nutrition trends...</div>
-    <div v-else-if="error" class="state error">{{ error }}</div>
+    <div v-if="loading && !series.length" class="state">Loading nutrition trends...</div>
+    <div v-else-if="error && !series.length" class="state error">{{ error }}</div>
     <div v-else class="trend-grid">
       <article
         v-for="chart in charts"

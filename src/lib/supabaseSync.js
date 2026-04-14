@@ -1,5 +1,16 @@
 import { supabase } from './supabaseClient'
 import { getStorageKeyForId } from './userStorage'
+import {
+  clearNutritionGoalsDirty,
+  clearNutritionMealsDirty,
+  clearNutritionWaterDirty,
+  getCachedNutritionGoals,
+  getCachedNutritionMealsByDate,
+  getCachedNutritionWaterByDate,
+  getDirtyNutritionMealDates,
+  getDirtyNutritionWaterDates,
+  hasDirtyNutritionGoals
+} from './nutritionSyncState'
 
 const STORAGE_KEYS = {
   plan: 'pf_plan_state',
@@ -20,6 +31,10 @@ function readJson(key, fallback) {
 function readUserJson(baseKey, userId, fallback) {
   const key = getStorageKeyForId(baseKey, userId)
   return readJson(key, fallback)
+}
+
+function isUuidLike(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''))
 }
 
 async function upsertByUser(table, userId, payload) {
@@ -157,6 +172,122 @@ async function syncRestDays(userId, restDays) {
   }
 }
 
+function sanitizeNutritionGoalRow(cachedGoals) {
+  if (!cachedGoals || typeof cachedGoals !== 'object') return null
+  return {
+    goal_type: cachedGoals.goal_type || 'maintenance',
+    calories_target: Number(cachedGoals.calories_target || 0),
+    protein_target_g: Number(cachedGoals.protein_target_g || 0),
+    carbs_target_g: Number(cachedGoals.carbs_target_g || 0),
+    fat_target_g: Number(cachedGoals.fat_target_g || 0),
+    water_target_ml: Number(cachedGoals.water_target_ml || 2500),
+    ai_calories_target: cachedGoals.ai_calories_target ?? null,
+    ai_protein_target_g: cachedGoals.ai_protein_target_g ?? null,
+    ai_carbs_target_g: cachedGoals.ai_carbs_target_g ?? null,
+    ai_fat_target_g: cachedGoals.ai_fat_target_g ?? null,
+    use_ai_targets: Boolean(cachedGoals.use_ai_targets),
+    goal_source: cachedGoals.goal_source || 'plan',
+    goal_override: Boolean(cachedGoals.goal_override),
+    linked_plan_goal_id: cachedGoals.linked_plan_goal_id || null,
+    linked_plan_goal_label: cachedGoals.linked_plan_goal_label || null,
+    updated_at: new Date().toISOString()
+  }
+}
+
+function sanitizeMealRows(userId, dateKey, cachedEntries) {
+  if (!Array.isArray(cachedEntries)) return []
+  return cachedEntries.map((entry) => {
+    const row = {
+      user_id: userId,
+      entry_date: entry.entryDate || dateKey,
+      meal_type: entry.mealType || 'breakfast',
+      food_id: isUuidLike(entry.foodId) ? entry.foodId : null,
+      food_name_snapshot: entry.foodNameSnapshot || 'Food entry',
+      brand_snapshot: entry.brandSnapshot || null,
+      quantity: Number(entry.quantity || 0),
+      unit: entry.unit === 'serving' ? 'serving' : 'g',
+      quantity_g: entry.quantityG ?? null,
+      serving_count: entry.servingCount ?? null,
+      calories: Number(entry.calories || 0),
+      protein_g: Number(entry.proteinG || 0),
+      carbs_g: Number(entry.carbsG || 0),
+      fat_g: Number(entry.fatG || 0),
+      is_custom: Boolean(entry.isCustom),
+      notes: entry.notes || null,
+      created_at: entry.createdAt || new Date().toISOString(),
+      updated_at: entry.updatedAt || new Date().toISOString()
+    }
+    if (isUuidLike(entry.id)) {
+      row.id = entry.id
+    }
+    return row
+  })
+}
+
+function sanitizeWaterRows(userId, dateKey, cachedEntries) {
+  if (!Array.isArray(cachedEntries)) return []
+  return cachedEntries.map((entry) => {
+    const row = {
+      user_id: userId,
+      entry_date: entry.entryDate || dateKey,
+      amount_ml: Number(entry.amountMl || 0),
+      created_at: entry.createdAt || new Date().toISOString()
+    }
+    if (isUuidLike(entry.id)) {
+      row.id = entry.id
+    }
+    return row
+  })
+}
+
+async function syncLocalNutritionDataToSupabase(userId) {
+  const user = { id: userId }
+
+  if (hasDirtyNutritionGoals(user)) {
+    const cachedGoals = getCachedNutritionGoals(user)
+    const payload = sanitizeNutritionGoalRow(cachedGoals)
+    if (payload) {
+      const { error } = await supabase
+        .from('user_nutrition_goals')
+        .upsert({ user_id: userId, ...payload }, { onConflict: 'user_id' })
+      if (error) throw error
+    }
+    clearNutritionGoalsDirty(user)
+  }
+
+  const dirtyMealDates = getDirtyNutritionMealDates(user)
+  for (const dateKey of dirtyMealDates) {
+    const rows = sanitizeMealRows(userId, dateKey, getCachedNutritionMealsByDate(user, dateKey))
+    const { error: deleteError } = await supabase
+      .from('meal_entries')
+      .delete()
+      .eq('user_id', userId)
+      .eq('entry_date', dateKey)
+    if (deleteError) throw deleteError
+    if (rows.length) {
+      const { error: insertError } = await supabase.from('meal_entries').insert(rows)
+      if (insertError) throw insertError
+    }
+    clearNutritionMealsDirty(user, dateKey)
+  }
+
+  const dirtyWaterDates = getDirtyNutritionWaterDates(user)
+  for (const dateKey of dirtyWaterDates) {
+    const rows = sanitizeWaterRows(userId, dateKey, getCachedNutritionWaterByDate(user, dateKey))
+    const { error: deleteError } = await supabase
+      .from('water_entries')
+      .delete()
+      .eq('user_id', userId)
+      .eq('entry_date', dateKey)
+    if (deleteError) throw deleteError
+    if (rows.length) {
+      const { error: insertError } = await supabase.from('water_entries').insert(rows)
+      if (insertError) throw insertError
+    }
+    clearNutritionWaterDirty(user, dateKey)
+  }
+}
+
 export async function syncLocalDataToSupabase(options = {}) {
   const { interactive = false } = options
   if (!supabase) {
@@ -191,6 +322,7 @@ export async function syncLocalDataToSupabase(options = {}) {
   }
   await syncWorkoutEntries(userId, workoutLogs)
   await syncRestDays(userId, restDays)
+  await syncLocalNutritionDataToSupabase(userId)
 
   return { status: 'done' }
 }

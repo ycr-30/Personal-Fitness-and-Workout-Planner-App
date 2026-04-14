@@ -19,18 +19,18 @@
       <section class="auth-card">
         <header class="card-header">
           <h2>Sign in</h2>
-          <p>Use your account or email to enter your control center.</p>
+          <p>Use your email and password to enter your control center.</p>
         </header>
 
         <form class="form" @submit.prevent="onSubmit">
           <div class="field">
-            <label for="login-identifier">Account or email</label>
+            <label for="login-identifier">Email address</label>
             <input
               id="login-identifier"
               v-model.trim="form.account"
-              type="text"
-              placeholder="yourname or you@example.com"
-              autocomplete="username"
+              type="email"
+              placeholder="you@example.com"
+              autocomplete="email"
               @blur="touched.account = true"
             />
             <p v-if="touched.account && inlineErrors.account" class="helper helper-error">
@@ -53,10 +53,15 @@
             </p>
           </div>
 
-          <label class="remember">
-            <input type="checkbox" v-model="form.remember" />
-            <span>Remember me</span>
-          </label>
+          <div class="form-meta">
+            <label class="remember">
+              <input type="checkbox" v-model="form.remember" />
+              <span>Remember me</span>
+            </label>
+            <button type="button" class="forgot-link" @click="openPasswordReset">
+              Forgot password?
+            </button>
+          </div>
 
           <transition name="fade">
             <p v-if="error" class="error">{{ error }}</p>
@@ -78,23 +83,25 @@
           <div class="divider"><span>or continue with</span></div>
           <div class="social-buttons">
             <button type="button" class="social-btn google" @click="startGoogle">
-              <span class="logo google-logo" aria-hidden="true">
-                <svg viewBox="0 0 48 48" role="img">
-                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.08 30.47 0 24 0 14.62 0 6.51 5.38 2.55 13.22l7.96 6.18C12.55 12.83 17.74 9.5 24 9.5z" />
-                  <path fill="#4285F4" d="M46.5 24.5c0-1.58-.14-3.1-.41-4.56H24v8.64h12.65c-.55 2.96-2.22 5.47-4.73 7.16l7.65 5.93C43.76 37.54 46.5 31.5 46.5 24.5z" />
-                  <path fill="#FBBC05" d="M10.51 28.04A14.46 14.46 0 0 1 9.75 24c0-1.41.24-2.78.67-4.04l-7.96-6.18A23.93 23.93 0 0 0 0 24c0 3.92.94 7.63 2.55 10.9l7.96-6.18z" />
-                  <path fill="#34A853" d="M24 48c6.48 0 11.92-2.13 15.89-5.81l-7.65-5.93c-2.13 1.44-4.86 2.29-8.24 2.29-6.26 0-11.45-3.33-13.49-8.04l-7.96 6.18C6.51 42.62 14.62 48 24 48z" />
-                  <path fill="none" d="M0 0h48v48H0z" />
-                </svg>
+              <span class="social-btn-content">
+                <span class="logo google-logo" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" role="img">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.08 30.47 0 24 0 14.62 0 6.51 5.38 2.55 13.22l7.96 6.18C12.55 12.83 17.74 9.5 24 9.5z" />
+                    <path fill="#4285F4" d="M46.5 24.5c0-1.58-.14-3.1-.41-4.56H24v8.64h12.65c-.55 2.96-2.22 5.47-4.73 7.16l7.65 5.93C43.76 37.54 46.5 31.5 46.5 24.5z" />
+                    <path fill="#FBBC05" d="M10.51 28.04A14.46 14.46 0 0 1 9.75 24c0-1.41.24-2.78.67-4.04l-7.96-6.18A23.93 23.93 0 0 0 0 24c0 3.92.94 7.63 2.55 10.9l7.96-6.18z" />
+                    <path fill="#34A853" d="M24 48c6.48 0 11.92-2.13 15.89-5.81l-7.65-5.93c-2.13 1.44-4.86 2.29-8.24 2.29-6.26 0-11.45-3.33-13.49-8.04l-7.96 6.18C6.51 42.62 14.62 48 24 48z" />
+                    <path fill="none" d="M0 0h48v48H0z" />
+                  </svg>
+                </span>
+                <span>Continue with Google</span>
               </span>
-              <span>Continue with Google</span>
             </button>
           </div>
           <p v-if="socialError" class="helper helper-error">
             {{ socialError }}
           </p>
           <button type="button" class="email-otp-trigger" @click="toggleEmailOtp">
-            Use another email
+            Sign in with email code
           </button>
         </div>
 
@@ -161,9 +168,156 @@
           </div>
         </transition>
 
+        <transition name="overlay">
+          <div v-if="showPasswordReset" class="email-otp-overlay" @click.self="closePasswordReset">
+            <div class="email-otp-modal password-reset-modal">
+              <button type="button" class="email-otp-close" @click="closePasswordReset">×</button>
+              <div class="email-otp-header">
+                <h3>Reset password</h3>
+                <p v-if="passwordReset.step !== 'success'">We’ll send a 6-digit verification code to your email.</p>
+                <p v-if="passwordReset.step !== 'success'" class="helper reset-scope-note">
+                  Only available for password-based accounts. Google sign-in and email-code sign-in do not use passwords.
+                </p>
+              </div>
+
+              <template v-if="passwordReset.step === 'email'">
+                <div class="field">
+                  <label for="reset-email">Email address</label>
+                  <input
+                    id="reset-email"
+                    v-model.trim="passwordReset.email"
+                    type="email"
+                    placeholder="you@example.com"
+                    @blur="passwordReset.touchedEmail = true"
+                  />
+                  <p v-if="passwordReset.touchedEmail && passwordResetEmailError" class="helper helper-error">
+                    {{ passwordResetEmailError }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="submit email-otp-submit"
+                  :disabled="loading || !!passwordResetEmailError"
+                  @click="sendPasswordResetCode"
+                >
+                  <span v-if="!loading">Send code</span>
+                  <span v-else>Sending…</span>
+                </button>
+                <p v-if="passwordReset.notice" class="helper">{{ passwordReset.notice }}</p>
+                <p v-if="passwordReset.error" class="helper helper-error">{{ passwordReset.error }}</p>
+                <button type="button" class="btn-link modal-back-link" @click="closePasswordReset">
+                  Back to sign in
+                </button>
+              </template>
+
+              <template v-else-if="passwordReset.step === 'code'">
+                <div class="field">
+                  <label for="reset-code">Verification code</label>
+                  <input
+                    id="reset-code"
+                    v-model.trim="passwordReset.code"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="6"
+                    placeholder="Enter 6-digit code"
+                    @blur="passwordReset.touchedCode = true"
+                  />
+                  <p v-if="passwordReset.touchedCode && passwordResetCodeError" class="helper helper-error">
+                    {{ passwordResetCodeError }}
+                  </p>
+                </div>
+                <div class="email-otp-row">
+                  <span class="email-otp-timer">
+                    <template v-if="passwordReset.remaining > 0">Resend code in {{ passwordReset.remaining }}s</template>
+                    <template v-else>Didn't get the code?</template>
+                  </span>
+                  <button
+                    type="button"
+                    class="btn-link"
+                    :disabled="loading || passwordReset.remaining > 0"
+                    @click="sendPasswordResetCode"
+                  >
+                    Resend code
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="submit email-otp-submit"
+                  :disabled="loading || !!passwordResetCodeError"
+                  @click="verifyPasswordResetCode"
+                >
+                  <span v-if="!loading">Verify code</span>
+                  <span v-else>Verifying…</span>
+                </button>
+                <p v-if="passwordReset.notice" class="helper">{{ passwordReset.notice }}</p>
+                <p v-if="passwordReset.error" class="helper helper-error">{{ passwordReset.error }}</p>
+                <button type="button" class="btn-link modal-back-link" @click="goBackToPasswordResetEmail">
+                  Back
+                </button>
+              </template>
+
+              <template v-else-if="passwordReset.step === 'password'">
+                <div class="field">
+                  <label for="reset-new-password">New password</label>
+                  <input
+                    id="reset-new-password"
+                    v-model="passwordReset.newPassword"
+                    type="password"
+                    placeholder="At least 6 characters"
+                    autocomplete="new-password"
+                    @blur="passwordReset.touchedPassword = true"
+                  />
+                </div>
+                <div class="field">
+                  <label for="reset-confirm-password">Confirm password</label>
+                  <input
+                    id="reset-confirm-password"
+                    v-model="passwordReset.confirmPassword"
+                    type="password"
+                    placeholder="Re-enter password"
+                    autocomplete="new-password"
+                    @blur="passwordReset.touchedConfirm = true"
+                  />
+                  <p
+                    v-if="(passwordReset.touchedPassword || passwordReset.touchedConfirm) && passwordResetPasswordError"
+                    class="helper helper-error"
+                  >
+                    {{ passwordResetPasswordError }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="submit email-otp-submit"
+                  :disabled="loading || !!passwordResetPasswordError"
+                  @click="confirmPasswordReset"
+                >
+                  <span v-if="!loading">Reset password</span>
+                  <span v-else>Updating…</span>
+                </button>
+                <p v-if="passwordReset.notice" class="helper">{{ passwordReset.notice }}</p>
+                <p v-if="passwordReset.error" class="helper helper-error">{{ passwordReset.error }}</p>
+              </template>
+
+              <template v-else>
+                <p class="success-copy">Password updated. You can now sign in with your new password.</p>
+                <button type="button" class="submit email-otp-submit" @click="closePasswordReset">
+                  Back to sign in
+                </button>
+              </template>
+            </div>
+          </div>
+        </transition>
+
         <footer class="card-footer">
           <p class="disclaimer">
             Fitness AI Planner is not a medical service. Consult a healthcare professional before beginning any new program.
+          </p>
+          <p class="legal-copy">
+            By signing in or continuing, you agree to the
+            <RouterLink to="/terms">Terms</RouterLink>,
+            acknowledge the <RouterLink to="/privacy">Privacy Policy</RouterLink>,
+            and confirm you have read the
+            <RouterLink to="/disclaimer">Health &amp; AI Disclaimer</RouterLink>.
           </p>
           <div>
             New to Fitness AI Planner?
@@ -194,7 +348,6 @@ import { getStableDeviceId, saveCloudClientState } from '@/lib/cloudClientState'
 const router = useRouter() // 获取路由实例
 const route = useRoute() // 获取当前路由
 const auth = useAuthStore() // 获取鉴权仓库
-auth.init() // 初始化用户会话
 auth.error = null // 清空错误提示
 
 // 登录表单数据与记住偏好
@@ -239,8 +392,6 @@ watch(
 )
 
 const emailPattern = /^\S+@\S+\.\S+$/ // 邮箱格式
-const usernamePattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/ // 用户名规则
-
 const inlineErrors = computed(() => {
   const messages = {
     account: '',
@@ -248,9 +399,9 @@ const inlineErrors = computed(() => {
   }
   const identifier = form.account?.trim?.() || ''
   if (!identifier) {
-    messages.account = 'Please enter your account or email.'
-  } else if (!emailPattern.test(identifier) && !usernamePattern.test(identifier)) {
-    messages.account = 'Please enter a valid account (email or 6+ chars with upper, lower, digits).'
+    messages.account = 'Please enter your email address.'
+  } else if (!emailPattern.test(identifier)) {
+    messages.account = 'Please enter a valid email address.'
   }
   if (!form.password) {
     messages.password = 'Please enter your password.'
@@ -308,6 +459,22 @@ const otp = reactive({
   loading: false
 })
 let otpTimer = null
+const showPasswordReset = ref(false)
+const passwordReset = reactive({
+  step: 'email',
+  email: '',
+  code: '',
+  newPassword: '',
+  confirmPassword: '',
+  remaining: 0,
+  notice: '',
+  error: '',
+  touchedEmail: false,
+  touchedCode: false,
+  touchedPassword: false,
+  touchedConfirm: false
+})
+let passwordResetTimer = null
 
 const otpError = computed(() => {
   if (!otp.email) return 'Please enter your email.'
@@ -316,7 +483,31 @@ const otpError = computed(() => {
   return ''
 })
 
+const passwordResetEmailError = computed(() => {
+  const pattern = /^\S+@\S+\.\S+$/
+  if (!passwordReset.email) return 'Invalid email address'
+  if (!pattern.test(passwordReset.email)) return 'Invalid email address'
+  return ''
+})
+
+const passwordResetCodeError = computed(() => {
+  if (!passwordReset.code) return 'Invalid verification code'
+  if (!/^\d{6}$/.test(passwordReset.code)) return 'Invalid verification code'
+  return ''
+})
+
+const passwordResetPasswordError = computed(() => {
+  if (!passwordReset.newPassword || passwordReset.newPassword.length < 6) {
+    return 'Password must meet minimum security requirements'
+  }
+  if (passwordReset.newPassword !== passwordReset.confirmPassword) {
+    return 'Passwords do not match'
+  }
+  return ''
+})
+
 function toggleEmailOtp() {
+  if (showPasswordReset.value) closePasswordReset()
   showEmailOtp.value = !showEmailOtp.value
 }
 
@@ -328,6 +519,10 @@ onBeforeUnmount(() => {
   if (otpTimer) {
     clearInterval(otpTimer)
     otpTimer = null
+  }
+  if (passwordResetTimer) {
+    clearInterval(passwordResetTimer)
+    passwordResetTimer = null
   }
 })
 
@@ -342,6 +537,169 @@ function startOtpTimer() {
       otpTimer = null
     }
   }, 1000)
+}
+
+function resetPasswordResetState({ keepEmail = false } = {}) {
+  const preservedEmail = keepEmail ? passwordReset.email : ''
+  passwordReset.step = 'email'
+  passwordReset.email = preservedEmail
+  passwordReset.code = ''
+  passwordReset.newPassword = ''
+  passwordReset.confirmPassword = ''
+  passwordReset.remaining = 0
+  passwordReset.notice = ''
+  passwordReset.error = ''
+  passwordReset.touchedEmail = false
+  passwordReset.touchedCode = false
+  passwordReset.touchedPassword = false
+  passwordReset.touchedConfirm = false
+  stopPasswordResetTimer()
+}
+
+function openPasswordReset() {
+  closeEmailOtp()
+  resetPasswordResetState()
+  if (/^\S+@\S+\.\S+$/.test(form.account || '')) {
+    passwordReset.email = form.account.trim()
+  }
+  showPasswordReset.value = true
+}
+
+function closePasswordReset() {
+  showPasswordReset.value = false
+  if (String(route.query.mode || '') === 'recovery') {
+    const nextQuery = { ...route.query }
+    delete nextQuery.mode
+    router.replace({ name: 'login', query: nextQuery })
+  }
+  resetPasswordResetState()
+}
+
+function goBackToPasswordResetEmail() {
+  resetPasswordResetState({ keepEmail: true })
+}
+
+function startPasswordResetTimer(initialSeconds = 60) {
+  stopPasswordResetTimer()
+  passwordReset.remaining = Math.max(0, Number(initialSeconds) || 60)
+  if (!passwordReset.remaining) return
+  passwordResetTimer = setInterval(() => {
+    passwordReset.remaining -= 1
+    if (passwordReset.remaining <= 0) {
+      passwordReset.remaining = 0
+      clearInterval(passwordResetTimer)
+      passwordResetTimer = null
+    }
+  }, 1000)
+}
+
+function stopPasswordResetTimer() {
+  if (passwordResetTimer) {
+    clearInterval(passwordResetTimer)
+    passwordResetTimer = null
+  }
+}
+
+async function applyRecoveryMode() {
+  if (String(route.query.mode || '') !== 'recovery') return
+  closeEmailOtp()
+  if (!showPasswordReset.value) {
+    showPasswordReset.value = true
+  }
+  if (passwordReset.step === 'success') return
+  if (!supabase) {
+    passwordReset.step = 'email'
+    passwordReset.notice = ''
+    passwordReset.error = 'Supabase auth is not configured.'
+    return
+  }
+
+  try {
+    const { data, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) {
+      passwordReset.step = passwordReset.email ? 'code' : 'email'
+      passwordReset.notice = ''
+      passwordReset.error = 'Recovery session expired. Please request a new code.'
+      return
+    }
+
+    const recoveryUser = data?.session?.user || null
+    if (!recoveryUser?.id) {
+      passwordReset.step = passwordReset.email ? 'code' : 'email'
+      passwordReset.notice = passwordReset.email
+        ? 'Enter the 6-digit recovery code from your email to continue.'
+        : 'Request a new recovery code to continue.'
+      passwordReset.error = ''
+      return
+    }
+
+    if (recoveryUser.email && !passwordReset.email) {
+      passwordReset.email = recoveryUser.email
+    }
+    passwordReset.step = 'password'
+    passwordReset.notice = 'Recovery verified. Set your new password.'
+    passwordReset.error = ''
+    stopPasswordResetTimer()
+  } catch (error) {
+    console.error('applyRecoveryMode failed', error)
+    passwordReset.step = passwordReset.email ? 'code' : 'email'
+    passwordReset.notice = ''
+    passwordReset.error = 'Recovery session expired. Please request a new code.'
+  }
+}
+
+async function sendPasswordResetCode() {
+  passwordReset.touchedEmail = true
+  passwordReset.error = ''
+  passwordReset.notice = ''
+  if (passwordResetEmailError.value) return
+  const result = await auth.sendPasswordResetCode(passwordReset.email)
+  if (!result?.success) {
+    passwordReset.error = auth.error || 'Failed to send verification code.'
+    return
+  }
+  passwordReset.step = 'code'
+  passwordReset.code = ''
+  passwordReset.touchedCode = false
+  passwordReset.notice = result.notice || result.message || 'If an account exists for this email, a verification code has been sent.'
+  startPasswordResetTimer(Number(result.resendIn || 60))
+}
+
+async function verifyPasswordResetCode() {
+  passwordReset.touchedCode = true
+  passwordReset.error = ''
+  passwordReset.notice = ''
+  if (passwordResetCodeError.value) return
+  const result = await auth.verifyPasswordResetCode({
+    email: passwordReset.email,
+    code: passwordReset.code
+  })
+  if (!result?.success) {
+    passwordReset.error = auth.error || 'Failed to verify code.'
+    return
+  }
+  passwordReset.email = result.email || passwordReset.email
+  passwordReset.step = 'password'
+  passwordReset.notice = 'Code verified. Set your new password.'
+  stopPasswordResetTimer()
+}
+
+async function confirmPasswordReset() {
+  passwordReset.touchedPassword = true
+  passwordReset.touchedConfirm = true
+  passwordReset.error = ''
+  if (passwordResetPasswordError.value) return
+  const result = await auth.confirmPasswordReset({
+    email: passwordReset.email,
+    newPassword: passwordReset.newPassword,
+    confirmPassword: passwordReset.confirmPassword
+  })
+  if (!result?.success) {
+    passwordReset.error = auth.error || 'Failed to update password.'
+    return
+  }
+  passwordReset.step = 'success'
+  passwordReset.notice = result.message || ''
 }
 
 async function sendOtpCode() {
@@ -371,6 +729,15 @@ async function sendOtpCode() {
     otp.loading = false
   }
 }
+
+watch(
+  () => route.query.mode,
+  async (mode) => {
+    if (String(mode || '') !== 'recovery') return
+    await applyRecoveryMode()
+  },
+  { immediate: true }
+)
 
 async function confirmOtp() {
   otp.touched = true
@@ -406,6 +773,7 @@ async function confirmOtp() {
       return
     }
     await auth.setUserFromSupabase(data.user)
+    await auth.syncServerSessionFromSupabase()
     await syncLoginPreferencesToCloud(otp.email)
     router.push('/onboarding')
   } finally {
@@ -455,13 +823,13 @@ async function onSubmit() {
   attempts.value = 0
   resetHint.value = false
   await syncLoginPreferencesToCloud(form.account)
-  welcomeOverlay.value = true
-  await new Promise((resolve) => setTimeout(resolve, 1000))
-  if (auth.user?.onboarding?.completed) {
-    router.push('/dashboard')
-  } else {
-    router.push('/onboarding')
-  }
+  const target =
+    auth.user?.onboarding?.completed && redirectPath.value
+      ? redirectPath.value
+      : auth.user?.onboarding?.completed
+        ? '/dashboard'
+        : '/onboarding'
+  router.replace(target)
 }
 </script>
 
@@ -600,10 +968,31 @@ async function onSubmit() {
   user-select: none;
 }
 
+.form-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .remember input {
   width: 16px;
   height: 16px;
   border-radius: 4px;
+}
+
+.forgot-link {
+  border: none;
+  background: transparent;
+  color: #0071e3;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
 }
 
 .helper {
@@ -614,6 +1003,11 @@ async function onSubmit() {
 
 .helper-error {
   color: #d70015;
+}
+
+.reset-scope-note {
+  margin-top: -4px;
+  max-width: 420px;
 }
 
 .error {
@@ -685,7 +1079,8 @@ async function onSubmit() {
   padding: 14px 18px;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  align-items: center;
   min-height: 52px;
   font-size: 16px;
   font-weight: 700;
@@ -697,6 +1092,13 @@ async function onSubmit() {
 .social-btn:hover {
   transform: translateY(-0.5px);
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+}
+
+.social-btn-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
 }
 
 .social-btn .logo {
@@ -713,6 +1115,10 @@ async function onSubmit() {
   width: 18px;
   height: 18px;
   display: block;
+}
+
+.social-btn-content > span:last-child {
+  text-align: center;
 }
 
 .social-btn.google .logo {
@@ -768,6 +1174,13 @@ async function onSubmit() {
   font-size: 12px;
   color: #8e8e93;
   line-height: 1.5;
+}
+
+.legal-copy {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #6e6e73;
 }
 
 .email-otp-trigger {
@@ -870,6 +1283,45 @@ async function onSubmit() {
   background: linear-gradient(145deg, #111, #2d2d2f);
 }
 
+.btn-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #0071e3;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.password-reset-modal {
+  gap: 18px;
+}
+
+.modal-back-link {
+  justify-self: start;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #f3f4f6;
+  color: #111827;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+.modal-back-link:hover {
+  background: #e8eaee;
+}
+
+.success-copy {
+  margin: 0;
+  color: #3a3a3c;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 .welcome-overlay {
   position: fixed;
   inset: 0;
@@ -937,6 +1389,11 @@ async function onSubmit() {
 @media (max-width: 640px) {
   .auth-page {
     padding: 40px 20px;
+  }
+
+  .form-meta {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .auth-container {

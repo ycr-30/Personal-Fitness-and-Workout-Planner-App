@@ -13,6 +13,21 @@ export async function requireNutritionUser() {
   return data.user
 }
 
+export function isNutritionSessionMissing(error) {
+  const message = String(error?.message || error || '')
+    .trim()
+    .toLowerCase()
+
+  if (!message) return false
+
+  return (
+    message.includes('supabase session') ||
+    message.includes('auth session missing') ||
+    message.includes('session missing') ||
+    message.includes('sign in with google or email code first')
+  )
+}
+
 export function formatSupabaseError(error, fallback = 'Request failed.') {
   if (!error) return fallback
   return error.message || error.details || fallback

@@ -25,9 +25,26 @@ model User {
   createdAt  DateTime @default(now())
   aiChatConversations AiChatConversation[]
   aiChatMessages      AiChatMessage[]
+  aiAgentRuns         AiAgentRun[]
   appState            UserAppState?
 
   @@unique([provider, providerId])
+}
+
+model AiAgentRun {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       Int?     @map("user_id")
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  agentType    String   @map("agent_type")
+  success      Boolean  @default(false)
+  usedFallback Boolean  @default(false) @map("used_fallback")
+  latencyMs    Int?     @map("latency_ms")
+  errorMessage String?  @map("error_message")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([agentType, createdAt])
+  @@map("ai_agent_runs")
 }
 
 model UserAppState {
@@ -44,45 +61,55 @@ model UserAppState {
 }
 
 model Muscle {
-  id       Int      @id @default(autoincrement())
-  name     String
-  slug     String   @unique
-  side     String
-  regionId String
+  id        BigInt     @id
+  name      String
+  slug      String     @unique
+  side      String
+  regionId  String     @map("region_id")
   exercises Exercise[] @relation("PrimaryMuscle")
-  createdAt DateTime @default(now())
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  @@map("muscles")
 }
 
 model Equipment {
-  id       Int      @id @default(autoincrement())
-  name     String
-  slug     String   @unique
+  id        BigInt               @id
+  name      String
+  slug      String               @unique
   exercises ExerciseEquipment[]
-  createdAt DateTime @default(now())
+  createdAt DateTime             @default(now()) @map("created_at")
+
+  @@map("equipments")
 }
 
 model Exercise {
-  id              Int      @id @default(autoincrement())
+  id              BigInt               @id
   name            String
-  slug            String   @unique
+  slug            String               @unique
   difficulty      String?
-  primaryMuscleId Int?
-  primaryMuscle   Muscle?  @relation("PrimaryMuscle", fields: [primaryMuscleId], references: [id])
-  instructions    Json?
+  primaryMuscleId BigInt?              @map("primary_muscle_id")
+  primaryMuscle   Muscle?              @relation("PrimaryMuscle", fields: [primaryMuscleId], references: [id])
+  instructions    Json
   notes           String?
   media           Json?
   equipments      ExerciseEquipment[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @default(now()) @map("updated_at")
+
+  @@index([primaryMuscleId])
+  @@map("exercises")
 }
 
 model ExerciseEquipment {
-  exerciseId  Int
-  equipmentId Int
-  exercise    Exercise @relation(fields: [exerciseId], references: [id])
+  exerciseId  BigInt    @map("exercise_id")
+  equipmentId BigInt    @map("equipment_id")
+  exercise    Exercise  @relation(fields: [exerciseId], references: [id])
   equipment   Equipment @relation(fields: [equipmentId], references: [id])
+  createdAt   DateTime  @default(now()) @map("created_at")
 
   @@id([exerciseId, equipmentId])
+  @@index([equipmentId])
+  @@map("exercise_equipments")
 }
 
 model AiChatConversation {

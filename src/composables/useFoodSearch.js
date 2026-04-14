@@ -1,6 +1,13 @@
 import { ref, watch } from 'vue'
 import { supabase } from '@/lib/supabaseClient'
-import { formatSupabaseError, inferFoodSubtype, mapFoodRow, normalizeSearchTerm, requireNutritionUser } from '@/lib/nutritionSupabase'
+import {
+  formatSupabaseError,
+  inferFoodSubtype,
+  isNutritionSessionMissing,
+  mapFoodRow,
+  normalizeSearchTerm,
+  requireNutritionUser
+} from '@/lib/nutritionSupabase'
 import { toDateKey } from '@/utils/mealTimeResolver'
 
 const SEARCH_SELECT_COLUMNS = [
@@ -110,7 +117,16 @@ export function useFoodSearch() {
   async function loadRecentFoods() {
     if (!supabase) return []
 
-    const user = await requireNutritionUser()
+    let user = null
+    try {
+      user = await requireNutritionUser()
+    } catch (error) {
+      if (isNutritionSessionMissing(error)) {
+        recentFoods.value = []
+        return []
+      }
+      throw error
+    }
     const endDate = new Date()
     const startDate = new Date(endDate)
     startDate.setDate(startDate.getDate() - 6)

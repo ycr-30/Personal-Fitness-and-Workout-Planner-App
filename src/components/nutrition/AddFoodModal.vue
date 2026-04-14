@@ -129,7 +129,7 @@
             </div>
           </article>
 
-          <p v-if="submitError" class="helper error">{{ submitError }}</p>
+          <p v-if="displayError" class="helper error">{{ displayError }}</p>
         </div>
 
         <footer class="modal-foot">
@@ -158,7 +158,8 @@ const props = defineProps({
   defaultUnit: { type: String, default: 'g' },
   defaultSearchMode: { type: String, default: 'recent' },
   editingEntry: { type: Object, default: null },
-  saving: { type: Boolean, default: false }
+  saving: { type: Boolean, default: false },
+  error: { type: String, default: '' }
 })
 
 const emit = defineEmits(['close', 'submit'])
@@ -221,6 +222,8 @@ const previewLabel = computed(() => {
   if (mode.value === 'custom') return custom.foodName || 'Custom food'
   return selectedFood.value?.foodName || 'Select a food to preview'
 })
+
+const displayError = computed(() => submitError.value || props.error || '')
 
 const servingSupported = computed(() => {
   if (mode.value === 'custom') return true

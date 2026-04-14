@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, unref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
-import { formatSupabaseError, requireNutritionUser } from '@/lib/nutritionSupabase'
+import { formatSupabaseError, isNutritionSessionMissing, requireNutritionUser } from '@/lib/nutritionSupabase'
 import {
   buildFallbackNutritionTargetRecommendation,
   generateNutritionTargetRecommendationsMap,
@@ -9,6 +9,7 @@ import {
   readStoredWorkoutLogs,
   syncNutritionGoalsWithPlan
 } from '@/lib/nutritionGoalSync'
+import { clearNutritionGoalsDirty, markNutritionGoalsDirty } from '@/lib/nutritionSyncState'
 import {
   buildNutritionSummary,
   buildTrendSeries,
@@ -60,22 +61,28 @@ function calculateExerciseBurn(logs, selectedDate) {
 export function useNutritionSummary({ selectedDate, mealEntries, waterEntries }) {
   const auth = useAuthStore()
 
+  function nutritionUserKey() {
+    return auth.user?.id || auth.user?.accountKey || auth.user?.email || auth.user?.name || 'nutrition-user'
+  }
+
   function getGoalsCacheKey() {
-    const userKey =
-      auth.user?.id || auth.user?.accountKey || auth.user?.email || auth.user?.name || 'nutrition-user'
-    return `pf_nutrition_goals:${userKey}`
+    return `pf_nutrition_goals:${nutritionUserKey()}`
   }
 
   function getRecommendationsCacheKey() {
-    const userKey =
-      auth.user?.id || auth.user?.accountKey || auth.user?.email || auth.user?.name || 'nutrition-user'
-    return `pf_nutrition_goal_recommendations:${userKey}`
+    return `pf_nutrition_goal_recommendations:${nutritionUserKey()}`
   }
 
   function getTrendCacheKey() {
-    const userKey =
-      auth.user?.id || auth.user?.accountKey || auth.user?.email || auth.user?.name || 'nutrition-user'
-    return `pf_nutrition_trends:${userKey}:${toDateKey(unref(selectedDate))}:${trendRange.value}`
+    return `pf_nutrition_trends:${nutritionUserKey()}:${toDateKey(unref(selectedDate))}:${trendRange.value}`
+  }
+
+  function getMealCacheKey(dateKey) {
+    return `pf_nutrition_meals:${nutritionUserKey()}:${dateKey}`
+  }
+
+  function getWaterCacheKey(dateKey) {
+    return `pf_nutrition_water:${nutritionUserKey()}:${dateKey}`
   }
 
   const goals = ref(readCachedValue(getGoalsCacheKey(), null))
@@ -104,6 +111,62 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
       exerciseBurn: exerciseBurn.value
     })
   )
+
+  function buildTrendSeriesFromLocalCache({ startDate, endDate }) {
+    const localMealEntries = []
+    const localWaterEntries = []
+    let cursor = parseDateValue(startDate) || new Date()
+    const end = parseDateValue(endDate) || new Date()
+
+    while (cursor <= end) {
+      const dateKey = toDateKey(cursor)
+      const cachedMeals = readCachedValue(getMealCacheKey(dateKey), [])
+      const cachedWater = readCachedValue(getWaterCacheKey(dateKey), [])
+
+      if (Array.isArray(cachedMeals)) {
+        cachedMeals.forEach((entry) => {
+          localMealEntries.push({
+            entryDate: entry.entryDate || dateKey,
+            calories: entry.calories,
+            proteinG: entry.proteinG,
+            carbsG: entry.carbsG,
+            fatG: entry.fatG
+          })
+        })
+      }
+
+      if (Array.isArray(cachedWater)) {
+        cachedWater.forEach((entry) => {
+          localWaterEntries.push({
+            entryDate: entry.entryDate || dateKey,
+            amountMl: entry.amountMl
+          })
+        })
+      }
+
+      cursor = new Date(cursor)
+      cursor.setDate(cursor.getDate() + 1)
+    }
+
+    return buildTrendSeries({
+      mealEntries: localMealEntries,
+      waterEntries: localWaterEntries,
+      startDate,
+      endDate
+    })
+  }
+
+  function hydrateTrendSeriesFromLocal() {
+    const cachedSeries = readCachedValue(getTrendCacheKey(), null)
+    if (Array.isArray(cachedSeries) && cachedSeries.length) {
+      trendSeries.value = cachedSeries
+      return
+    }
+
+    const endDate = parseDateValue(unref(selectedDate)) || new Date()
+    const startDate = shiftDate(endDate, -(trendRange.value - 1))
+    trendSeries.value = buildTrendSeriesFromLocalCache({ startDate, endDate })
+  }
 
   function seedRecommendedTargets(planState = planStateSnapshot.value) {
     recommendedTargets.value = {
@@ -170,14 +233,19 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
 
     goalsLoading.value = true
     goalsError.value = ''
+    planStateSnapshot.value = readStoredPlanState(auth.user) || {}
+    seedRecommendedTargets(planStateSnapshot.value)
+    refreshRecommendedTargets(planStateSnapshot.value)
 
     try {
       await requireNutritionUser()
-      planStateSnapshot.value = readStoredPlanState(auth.user) || {}
-      seedRecommendedTargets(planStateSnapshot.value)
-      refreshRecommendedTargets(planStateSnapshot.value)
       await syncGoalsFromPlan(planStateSnapshot.value)
     } catch (err) {
+      if (isNutritionSessionMissing(err)) {
+        goalsError.value = ''
+        await syncGoalsFromPlan(planStateSnapshot.value)
+        return
+      }
       goalsError.value = 'Unable to load nutrition goals right now.'
     } finally {
       goalsLoading.value = false
@@ -187,49 +255,66 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
   async function saveGoals(nextValues) {
     if (!supabase) throw new Error('Supabase is not configured.')
     goalsError.value = ''
+    const planState = planStateSnapshot.value || readStoredPlanState(auth.user) || {}
+    const linkedGoal = buildPlanGoalLink(planState)
+    const nextGoalType = linkedGoal.nutritionGoalType || nextValues.goal_type || goals.value?.goal_type || 'maintenance'
+    const nextAiTargets =
+      recommendedTargets.value[nextGoalType] ||
+      buildFallbackNutritionTargetRecommendation({
+        authUser: auth.user,
+        planState,
+        goalType: nextGoalType
+      })
+    const payload = {
+      goal_type: nextGoalType,
+      calories_target: toNumber(nextValues.calories_target),
+      protein_target_g: toNumber(nextValues.protein_target_g),
+      carbs_target_g: toNumber(nextValues.carbs_target_g),
+      fat_target_g: toNumber(nextValues.fat_target_g),
+      water_target_ml: toNumber(nextValues.water_target_ml, 2500),
+      use_ai_targets: false,
+      ai_calories_target: toNumber(nextAiTargets.ai_calories_target || nextAiTargets.calories_target),
+      ai_protein_target_g: toNumber(nextAiTargets.ai_protein_target_g || nextAiTargets.protein_target_g),
+      ai_carbs_target_g: toNumber(nextAiTargets.ai_carbs_target_g || nextAiTargets.carbs_target_g),
+      ai_fat_target_g: toNumber(nextAiTargets.ai_fat_target_g || nextAiTargets.fat_target_g),
+      updated_at: new Date().toISOString()
+    }
 
     try {
       const user = await requireNutritionUser()
-      const planState = planStateSnapshot.value || readStoredPlanState(auth.user) || {}
-      const linkedGoal = buildPlanGoalLink(planState)
-      const nextGoalType = linkedGoal.nutritionGoalType || nextValues.goal_type || goals.value?.goal_type || 'maintenance'
-      const nextAiTargets =
-        recommendedTargets.value[nextGoalType] ||
-        buildFallbackNutritionTargetRecommendation({
-          authUser: auth.user,
-          planState,
-          goalType: nextGoalType
-        })
-
-      const payload = {
-        goal_type: nextGoalType,
-        calories_target: toNumber(nextValues.calories_target),
-        protein_target_g: toNumber(nextValues.protein_target_g),
-        carbs_target_g: toNumber(nextValues.carbs_target_g),
-        fat_target_g: toNumber(nextValues.fat_target_g),
-        water_target_ml: toNumber(nextValues.water_target_ml, 2500),
-        use_ai_targets: false,
-        ai_calories_target: toNumber(nextAiTargets.ai_calories_target || nextAiTargets.calories_target),
-        ai_protein_target_g: toNumber(nextAiTargets.ai_protein_target_g || nextAiTargets.protein_target_g),
-        ai_carbs_target_g: toNumber(nextAiTargets.ai_carbs_target_g || nextAiTargets.carbs_target_g),
-        ai_fat_target_g: toNumber(nextAiTargets.ai_fat_target_g || nextAiTargets.fat_target_g),
-        updated_at: new Date().toISOString()
-      }
-
       const { data, error } = await supabase
         .from('user_nutrition_goals')
-        .update(payload)
-        .eq('user_id', user.id)
+        .upsert(
+          {
+            user_id: user.id,
+            ...payload
+          },
+          { onConflict: 'user_id' }
+        )
         .select('*')
         .single()
 
       if (error) throw error
       goals.value = data
       writeCachedValue(getGoalsCacheKey(), goals.value)
+      clearNutritionGoalsDirty(auth.user)
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('pf_nutrition_updated'))
       }
     } catch (err) {
+      if (isNutritionSessionMissing(err)) {
+        goalsError.value = ''
+        goals.value = {
+          ...(goals.value || {}),
+          ...payload
+        }
+        writeCachedValue(getGoalsCacheKey(), goals.value)
+        markNutritionGoalsDirty(auth.user)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('pf_nutrition_updated'))
+        }
+        return
+      }
       goalsError.value = 'Unable to save nutrition goals right now.'
       throw err
     }
@@ -246,9 +331,9 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
     trendsError.value = ''
 
     try {
-      const user = await requireNutritionUser()
       const endDate = parseDateValue(unref(selectedDate)) || new Date()
       const startDate = shiftDate(endDate, -(trendRange.value - 1))
+      const user = await requireNutritionUser()
       const startKey = toDateKey(startDate)
       const endKey = toDateKey(endDate)
 
@@ -291,6 +376,14 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
       })
       writeCachedValue(getTrendCacheKey(), trendSeries.value)
     } catch (err) {
+      if (isNutritionSessionMissing(err)) {
+        trendsError.value = ''
+        const endDate = parseDateValue(unref(selectedDate)) || new Date()
+        const startDate = shiftDate(endDate, -(trendRange.value - 1))
+        trendSeries.value = buildTrendSeriesFromLocalCache({ startDate, endDate })
+        writeCachedValue(getTrendCacheKey(), trendSeries.value)
+        return
+      }
       trendsError.value = formatSupabaseError(err, 'Unable to load nutrition trends.')
     } finally {
       trendsLoading.value = false
@@ -300,14 +393,14 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
   watch(
     () => toDateKey(unref(selectedDate)),
     () => {
-      trendSeries.value = readCachedValue(getTrendCacheKey(), trendSeries.value || [])
+      hydrateTrendSeriesFromLocal()
       refreshTrends()
     },
     { immediate: true }
   )
 
   watch(trendRange, () => {
-    trendSeries.value = readCachedValue(getTrendCacheKey(), trendSeries.value || [])
+    hydrateTrendSeriesFromLocal()
     refreshTrends()
   })
 

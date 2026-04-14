@@ -1,7 +1,13 @@
 import { computed, ref, unref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
-import { formatSupabaseError, mapWaterEntryRow, requireNutritionUser } from '@/lib/nutritionSupabase'
+import {
+  formatSupabaseError,
+  isNutritionSessionMissing,
+  mapWaterEntryRow,
+  requireNutritionUser
+} from '@/lib/nutritionSupabase'
+import { clearNutritionWaterDirty, markNutritionWaterDirty } from '@/lib/nutritionSyncState'
 import { summarizeWaterEntries } from '@/utils/nutritionCalculations'
 import { toDateKey } from '@/utils/mealTimeResolver'
 
@@ -39,10 +45,30 @@ export function useWaterIntake(selectedDate) {
 
   const totalWaterMl = computed(() => summarizeWaterEntries(entries.value))
 
+  function createLocalWaterEntry(amountMl) {
+    const timestamp = new Date().toISOString()
+    return {
+      id: `local-water-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      userId: auth.user?.id || null,
+      entryDate: toDateKey(unref(selectedDate)),
+      amountMl: Math.max(0, Math.round(Number(amountMl) || 0)),
+      createdAt: timestamp
+    }
+  }
+
+  function commitLocalEntries(nextEntries) {
+    const date = toDateKey(unref(selectedDate))
+    entries.value = Array.isArray(nextEntries) ? nextEntries : []
+    writeCachedEntries(date, entries.value)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('pf_nutrition_updated'))
+    }
+  }
+
   async function refresh() {
     if (!supabase) {
       error.value = 'Supabase is not configured.'
-      entries.value = []
+      entries.value = readCachedEntries()
       return
     }
 
@@ -63,6 +89,11 @@ export function useWaterIntake(selectedDate) {
       entries.value = Array.isArray(data) ? data.map((row) => mapWaterEntryRow(row)) : []
       writeCachedEntries(date, entries.value)
     } catch (err) {
+      if (isNutritionSessionMissing(err)) {
+        error.value = ''
+        entries.value = readCachedEntries()
+        return
+      }
       error.value = formatSupabaseError(err, 'Unable to load water entries.')
     } finally {
       loading.value = false
@@ -84,10 +115,17 @@ export function useWaterIntake(selectedDate) {
       ])
       if (insertError) throw insertError
       await refresh()
+      clearNutritionWaterDirty(auth.user, toDateKey(unref(selectedDate)))
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('pf_nutrition_updated'))
       }
     } catch (err) {
+      if (isNutritionSessionMissing(err)) {
+        error.value = ''
+        commitLocalEntries([createLocalWaterEntry(amountMl), ...entries.value])
+        markNutritionWaterDirty(auth.user, toDateKey(unref(selectedDate)))
+        return
+      }
       error.value = formatSupabaseError(err, 'Unable to add water entry.')
       throw err
     } finally {
@@ -108,10 +146,17 @@ export function useWaterIntake(selectedDate) {
         .eq('user_id', user.id)
       if (deleteError) throw deleteError
       await refresh()
+      clearNutritionWaterDirty(auth.user, toDateKey(unref(selectedDate)))
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('pf_nutrition_updated'))
       }
     } catch (err) {
+      if (isNutritionSessionMissing(err)) {
+        error.value = ''
+        commitLocalEntries(entries.value.filter((entry) => entry.id !== entryId))
+        markNutritionWaterDirty(auth.user, toDateKey(unref(selectedDate)))
+        return
+      }
       error.value = formatSupabaseError(err, 'Unable to delete water entry.')
       throw err
     } finally {

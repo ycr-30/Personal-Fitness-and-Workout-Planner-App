@@ -28,16 +28,19 @@ import { getIdentityFromUser, getUserStorageKey } from '@/lib/userStorage'
 
 const route = useRoute()
 const auth = useAuthStore()
-auth.init()
 const { settings, loadSettings } = useUserSettings()
 
 const hideShell = computed(() => route.meta?.hideShell)
+const isPublicGuestRoute = computed(() => route.meta?.publicGuestRoute === true)
 const showShell = computed(() => auth.isAuthed && !hideShell.value)
-const showCoachChat = computed(() => showShell.value)
+const showCoachChat = computed(() => showShell.value && !isPublicGuestRoute.value)
 const systemTheme = ref('light')
 const syncInProgress = ref(false)
 const syncTimer = ref(null)
 const authIdentity = computed(() => auth.user?.account || auth.user?.email || auth.user?.name || null)
+const APP_LOCAL_FLAGS_STATE_KEY = import.meta.env.DEV ? 'app_local_flags_dev' : 'app_local_flags'
+const DEFAULT_PAGE_TITLE = 'KeepFit'
+const DEFAULT_PAGE_DESCRIPTION = 'A calm control center for training, recovery, nutrition, and measurable progress.'
 
 function syncKeyForUser(user) {
   const identity = getIdentityFromUser(user)
@@ -60,9 +63,9 @@ async function hydrateCloudFlags(user) {
     const state = await loadCloudClientState({
       scope: 'device',
       deviceId: getStableDeviceId(),
-      keys: ['app_local_flags']
+      keys: [APP_LOCAL_FLAGS_STATE_KEY]
     })
-    const flags = state?.app_local_flags
+    const flags = state?.[APP_LOCAL_FLAGS_STATE_KEY]
     if (!flags || typeof flags !== 'object') return
     const key = syncKeyForUser(user)
     const connectedKey = connectedKeyForUser(user)
@@ -83,7 +86,7 @@ function syncCloudFlags(user) {
   saveCloudClientState({
     scope: 'device',
     deviceId: getStableDeviceId(),
-    stateKey: 'app_local_flags',
+    stateKey: APP_LOCAL_FLAGS_STATE_KEY,
     stateValue: {
       supabaseSynced: localStorage.getItem(key) === '1',
       connected: localStorage.getItem(connectedKey) === '1',
@@ -104,14 +107,48 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme
 }
 
+function ensureDescriptionMeta() {
+  if (typeof document === 'undefined') return null
+  let meta = document.head.querySelector('meta[name="description"]')
+  if (meta) return meta
+  meta = document.createElement('meta')
+  meta.setAttribute('name', 'description')
+  document.head.appendChild(meta)
+  return meta
+}
+
+function applyRouteMetadata() {
+  if (typeof document === 'undefined') return
+  const title = route.meta?.pageTitle || DEFAULT_PAGE_TITLE
+  const description = route.meta?.pageDescription || DEFAULT_PAGE_DESCRIPTION
+  document.title = title
+  const meta = ensureDescriptionMeta()
+  if (meta) {
+    meta.setAttribute('content', description)
+  }
+}
+
 watch(resolvedTheme, (theme) => {
   applyTheme(theme)
 }, { immediate: true })
 
 watch(
-  authIdentity,
-  async (identity) => {
-    if (!identity || !auth.user || syncInProgress.value) return
+  () => route.fullPath,
+  () => {
+    applyRouteMetadata()
+  },
+  { immediate: true }
+)
+
+watch(
+  [authIdentity, isPublicGuestRoute],
+  async ([identity, isPublicRoute]) => {
+    if (!identity || !auth.user || syncInProgress.value || isPublicRoute) return
+    try {
+      await auth.hydrateFromSupabaseSession()
+    } catch (error) {
+      console.error('Supabase session hydrate failed during app bootstrap', error)
+    }
     await loadSettings({ force: true })
     await hydrateCloudFlags(auth.user)
     const key = syncKeyForUser(auth.user)
@@ -162,7 +199,13 @@ watch(
     if (localStorage.getItem(key) === '1') return
     syncInProgress.value = true
     try {
-      const result = await syncLocalDataToSupabase({ interactive: !alreadyConnected })
+      const isLocalDevHost =
+        typeof window !== 'undefined' &&
+        ['localhost', '127.0.0.1'].includes(window.location.hostname)
+
+      const result = await syncLocalDataToSupabase({
+        interactive: !isLocalDevHost && !alreadyConnected
+      })
       if (result?.status === 'done') {
         localStorage.setItem(key, '1')
         localStorage.setItem(connectedKey, '1')
@@ -178,7 +221,7 @@ watch(
 )
 
 function scheduleAutoSync() {
-  if (!auth.user) return
+  if (!auth.user || isPublicGuestRoute.value) return
   if (syncTimer.value) {
     clearTimeout(syncTimer.value)
   }
@@ -223,6 +266,7 @@ onMounted(() => {
     window.addEventListener('pf_logs_updated', scheduleAutoSync)
     window.addEventListener('pf_plan_updated', scheduleAutoSync)
     window.addEventListener('pf_rest_updated', scheduleAutoSync)
+    window.addEventListener('pf_nutrition_updated', scheduleAutoSync)
     window.addEventListener('storage', scheduleAutoSync)
   }
 })
@@ -239,6 +283,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('pf_logs_updated', scheduleAutoSync)
     window.removeEventListener('pf_plan_updated', scheduleAutoSync)
     window.removeEventListener('pf_rest_updated', scheduleAutoSync)
+    window.removeEventListener('pf_nutrition_updated', scheduleAutoSync)
     window.removeEventListener('storage', scheduleAutoSync)
   }
 })
@@ -364,6 +409,12 @@ button:hover,
 
 .app-main.compact {
   display: block;
+}
+
+@media (min-width: 1280px) {
+  .app-shell {
+    grid-template-columns: 232px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 980px) {

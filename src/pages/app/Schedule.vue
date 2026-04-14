@@ -1754,6 +1754,85 @@ h1 {
   opacity: 0;
 }
 
+@media (min-width: 1280px) {
+  .schedule-page {
+    padding: 28px clamp(18px, 3vw, 36px) 44px;
+    gap: 18px;
+  }
+
+  .page-header {
+    gap: 14px;
+  }
+
+  h1 {
+    font-size: clamp(28px, 3vw, 38px);
+  }
+
+  .subtitle {
+    margin-top: 6px;
+  }
+
+  .header-actions,
+  .metric-strip,
+  .layout-grid {
+    gap: 10px;
+  }
+
+  .today-chip,
+  .metric-card {
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .today-chip {
+    min-width: 184px;
+  }
+
+  .today-chip strong,
+  .metric-card strong {
+    font-size: 20px;
+  }
+
+  .btn {
+    padding: 9px 12px;
+  }
+
+  .btn.small {
+    padding: 6px 10px;
+  }
+
+  .calendar-card,
+  .day-card {
+    padding: 14px;
+    gap: 10px;
+    border-radius: 18px;
+  }
+
+  .calendar-toolbar h2,
+  .day-header h2 {
+    font-size: 18px;
+  }
+
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .session-list {
+    gap: 8px;
+  }
+
+  .session-item {
+    gap: 8px;
+    padding: 9px 10px;
+    border-radius: 12px;
+  }
+
+  .empty-tip {
+    padding: 14px;
+  }
+}
+
 @media (max-width: 1100px) {
   .layout-grid {
     grid-template-columns: 1fr;

@@ -41,6 +41,7 @@
     </div>
 
     <div class="water-history">
+      <div v-if="error" class="state error-state">{{ error }}</div>
       <div v-if="loading" class="state">Loading water entries...</div>
       <div v-else-if="!entries.length" class="state">No water logged for this date yet.</div>
       <div v-else class="timeline-list">
@@ -74,6 +75,7 @@ const props = defineProps({
   entries: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
+  error: { type: String, default: '' },
   quickAmounts: {
     type: Array,
     default: () => [250, 500]
@@ -244,6 +246,11 @@ function formatEntryTime(value) {
 .state {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.error-state {
+  color: #b91c1c;
+  font-weight: 600;
 }
 
 @media (max-width: 720px) {

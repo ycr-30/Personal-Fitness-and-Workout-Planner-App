@@ -4026,6 +4026,127 @@ watch(
   opacity: 0;
 }
 
+@media (min-width: 1280px) {
+  .plans-page {
+    padding: 26px clamp(18px, 3vw, 40px) 52px;
+    gap: 16px;
+  }
+
+  .plans-header {
+    gap: 14px;
+  }
+
+  .header-right {
+    gap: 8px;
+  }
+
+  .plan-time {
+    font-size: clamp(20px, 2.6vw, 28px);
+  }
+
+  .header-left h1 {
+    margin: 4px 0 6px;
+    font-size: clamp(24px, 3vw, 32px);
+  }
+
+  .activity-pill {
+    gap: 14px;
+    min-width: 248px;
+    padding: 12px 14px;
+    border-radius: 16px;
+  }
+
+  .activity-ring {
+    width: 48px;
+    height: 48px;
+  }
+
+  .activity-ring::after {
+    width: 34px;
+    height: 34px;
+  }
+
+  .plans-page > .card {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .btn {
+    padding: 9px 14px;
+  }
+
+  .goal-summary,
+  .challenge-summary,
+  .related-section,
+  .ability-section {
+    gap: 10px;
+  }
+
+  .challenge-summary .section-head {
+    margin-bottom: 12px;
+  }
+
+  .goal-title {
+    gap: 10px;
+  }
+
+  .goal-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    font-size: 18px;
+  }
+
+  .weight-stats .current strong {
+    font-size: 23px;
+  }
+
+  .chip {
+    padding: 7px 12px;
+  }
+
+  .daily-list,
+  .related-list,
+  .ability-grid {
+    gap: 8px;
+  }
+
+  .daily-card,
+  .related-card,
+  .ability-card {
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .daily-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    font-size: 12px;
+  }
+
+  .ability-card {
+    gap: 6px;
+  }
+
+  .ability-card.editable input {
+    padding: 7px 10px;
+  }
+
+  .weight-chart {
+    height: 156px;
+    padding: 10px;
+  }
+
+  .record-item {
+    padding: 10px 12px;
+  }
+
+  .view-more {
+    padding: 8px 12px;
+  }
+}
+
 @media (max-width: 640px) {
   .plans-header {
     flex-direction: column;

@@ -1,9 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { getStableDeviceId, loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
+import { getStableDeviceId, saveCloudClientState } from '@/lib/cloudClientState'
 
 // 按你当前的目录结构引入页面
 import Landing from '@/pages/Landing.vue'
+import Privacy from '@/pages/Privacy.vue'
+import Terms from '@/pages/Terms.vue'
+import Disclaimer from '@/pages/Disclaimer.vue'
 import Login from '@/pages/auth/Login.vue'
 import Register from '@/pages/auth/Register.vue'
 import Dashboard from '@/pages/app/Dashboard.vue'
@@ -17,18 +20,8 @@ import Profile from '@/pages/app/Profile.vue'
 import Settings from '@/pages/app/Settings.vue'
 import Onboarding from '@/pages/onboarding/Survey.vue'
 
-const LAST_APP_ROUTE_KEY = 'pf_last_app_route'
-let activeCloudRouteIdentity = ''
-
-function readLastAppRoute() {
-  if (typeof window === 'undefined') return ''
-  const raw = window.localStorage.getItem(LAST_APP_ROUTE_KEY) || ''
-  if (!raw.startsWith('/')) return ''
-  if (raw === '/' || raw.startsWith('/login') || raw.startsWith('/register') || raw.startsWith('/onboarding')) {
-    return ''
-  }
-  return raw
-}
+const LAST_APP_ROUTE_KEY = import.meta.env.DEV ? 'pf_last_app_route_dev' : 'pf_last_app_route'
+const ENABLE_CLOUD_LAST_ROUTE_SYNC = !import.meta.env.DEV
 
 function writeLastAppRoute(route) {
   if (typeof window === 'undefined') return
@@ -36,33 +29,8 @@ function writeLastAppRoute(route) {
   window.localStorage.setItem(LAST_APP_ROUTE_KEY, route.fullPath)
 }
 
-async function hydrateLastAppRouteFromCloud(auth) {
-  if (typeof window === 'undefined' || !auth?.user) return ''
-  const identity = auth.user.id || auth.user.email || auth.user.account || auth.user.name || ''
-  if (!identity || activeCloudRouteIdentity === identity) {
-    return readLastAppRoute()
-  }
-
-  activeCloudRouteIdentity = identity
-  try {
-    const state = await loadCloudClientState({
-      scope: 'device',
-      deviceId: getStableDeviceId(),
-      keys: ['last_app_route']
-    })
-    const route = String(state?.last_app_route?.value || '').trim()
-    if (route.startsWith('/')) {
-      window.localStorage.setItem(LAST_APP_ROUTE_KEY, route)
-      return route
-    }
-  } catch (error) {
-    console.error('Failed to hydrate last route from cloud', error)
-  }
-
-  return readLastAppRoute()
-}
-
 function syncLastAppRouteToCloud(route) {
+  if (!ENABLE_CLOUD_LAST_ROUTE_SYNC) return
   if (typeof window === 'undefined' || !route?.fullPath || !route?.meta?.requiresAuth) return
   saveCloudClientState({
     scope: 'device',
@@ -77,9 +45,83 @@ function syncLastAppRouteToCloud(route) {
 }
 
 const routes = [
-  { path: '/', name: 'landing', component: Landing, meta: { hideShell: true } }, // 主页/介绍页
-  { path: '/login', name: 'login', component: Login, meta: { guestOnly: true, hideShell: true } }, // 登录
-  { path: '/register', name: 'register', component: Register, meta: { guestOnly: true, hideShell: true } }, // 注册
+  {
+    path: '/',
+    name: 'landing',
+    component: Landing,
+    meta: {
+      hideShell: true,
+      publicGuestRoute: true,
+      pageTitle: 'Fitness AI Planner',
+      pageDescription:
+        'Plan smarter training, track real progress, and get grounded AI guidance from your workouts, body data, and nutrition logs.'
+    }
+  },
+  {
+    path: '/privacy',
+    name: 'privacy',
+    component: Privacy,
+    meta: {
+      hideShell: true,
+      publicGuestRoute: true,
+      publicInfoPage: true,
+      pageTitle: 'Privacy Policy | Fitness AI Planner',
+      pageDescription:
+        'Read how Fitness AI Planner handles account, workout, body, nutrition, hydration, and technical information.'
+    }
+  },
+  {
+    path: '/terms',
+    name: 'terms',
+    component: Terms,
+    meta: {
+      hideShell: true,
+      publicGuestRoute: true,
+      publicInfoPage: true,
+      pageTitle: 'Terms of Service | Fitness AI Planner',
+      pageDescription:
+        'Review the core service terms, account responsibilities, AI-output limits, and acceptable-use expectations for Fitness AI Planner.'
+    }
+  },
+  {
+    path: '/disclaimer',
+    name: 'disclaimer',
+    component: Disclaimer,
+    meta: {
+      hideShell: true,
+      publicGuestRoute: true,
+      publicInfoPage: true,
+      pageTitle: 'Disclaimer | Fitness AI Planner',
+      pageDescription:
+        'Understand the health, AI, and training limitations of Fitness AI Planner guidance before relying on recommendations.'
+    }
+  },
+  {
+    path: '/login',
+    name: 'login',
+    component: Login,
+    meta: {
+      guestOnly: true,
+      hideShell: true,
+      publicGuestRoute: true,
+      pageTitle: 'Sign In | Fitness AI Planner',
+      pageDescription:
+        'Sign in to Fitness AI Planner to access your training plans, progress analytics, nutrition logs, and grounded AI guidance.'
+    }
+  },
+  {
+    path: '/register',
+    name: 'register',
+    component: Register,
+    meta: {
+      guestOnly: true,
+      hideShell: true,
+      publicGuestRoute: true,
+      pageTitle: 'Create Account | Fitness AI Planner',
+      pageDescription:
+        'Create your Fitness AI Planner account to build training plans, log nutrition data, track progress, and receive grounded AI guidance.'
+    }
+  },
   { path: '/onboarding', name: 'onboarding', component: Onboarding, meta: { requiresAuth: true, hideShell: true } }, // 登录后信息调查
   { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { requiresAuth: true } }, // 登录后主页
   { path: '/schedule', name: 'schedule', component: Schedule, meta: { requiresAuth: true } },
@@ -106,29 +148,25 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
   const isOnboardingEdit = to.name === 'onboarding' && String(to.query.edit || '') === '1'
+  const isRecoveryRoute = to.name === 'login' && String(to.query.mode || '') === 'recovery'
+  const isPublicInfoPage = to.meta?.publicInfoPage === true
+
   if (!auth.user) auth.init()
   await auth.hydrateFromServer()
-  if (auth.isAuthed) {
-    await auth.hydrateOnboardingFromSupabase()
-  }
 
   if (to.meta.requiresAuth && !auth.isAuthed) {
     return next({ name: 'login', query: { redirect: to.fullPath } })
   }
 
-  if (auth.isAuthed && !auth.user?.onboarding?.completed && to.name !== 'onboarding') {
+  if (auth.isAuthed && !auth.user?.onboarding?.completed && to.name !== 'onboarding' && !isPublicInfoPage) {
     return next({ name: 'onboarding' })
   }
 
   if (to.name === 'landing' && auth.isAuthed) {
-    const lastAppRoute = await hydrateLastAppRouteFromCloud(auth)
-    if (lastAppRoute) {
-      return next(lastAppRoute)
-    }
     return next({ name: 'dashboard' })
   }
 
-  if (to.meta.guestOnly && auth.isAuthed) {
+  if (to.meta.guestOnly && auth.isAuthed && !isRecoveryRoute) {
     if (auth.user?.onboarding?.completed) {
       return next({ name: 'dashboard' })
     }

@@ -699,10 +699,16 @@ async function sendMessage() {
     const resultAssistantMessage = normalizeMessage(payload?.assistantMessage)
     messages.value = messages.value.filter((item) => item.id !== optimisticUserMessage.id)
     messages.value.push(resultUserMessage, resultAssistantMessage)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('pf_ai_agent_run'))
+    }
     await scrollToBottom()
   } catch (error) {
     messages.value = messages.value.filter((item) => item.id !== optimisticUserMessage.id)
     errorMessage.value = error?.message || 'Failed to send message.'
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('pf_ai_agent_run'))
+    }
   } finally {
     sending.value = false
   }

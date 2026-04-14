@@ -210,6 +210,33 @@ onBeforeUnmount(() => {
   transform: translateY(-6px);
 }
 
+@media (min-width: 1280px) {
+  .trigger {
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .avatar {
+    width: 38px;
+    height: 38px;
+    font-size: 12px;
+  }
+
+  .name {
+    font-size: 13px;
+  }
+
+  .meta,
+  .item {
+    font-size: 12px;
+  }
+
+  .item {
+    padding: 10px 14px;
+  }
+}
+
 @media (max-width: 980px) {
   .trigger {
     width: auto;

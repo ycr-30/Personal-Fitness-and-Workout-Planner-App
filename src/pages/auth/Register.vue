@@ -25,20 +25,20 @@
             </div>
 
             <div class="field">
-              <label for="register-account">Account or email</label>
+              <label for="register-account">{{ isSocial ? 'Username' : 'Email address' }}</label>
               <input
                 id="register-account"
                 v-model.trim="form.account"
-                type="text"
-                placeholder="yourname or you@example.com"
-                autocomplete="username"
+                :type="isSocial ? 'text' : 'email'"
+                :placeholder="isSocial ? 'yourname' : 'you@example.com'"
+                :autocomplete="isSocial ? 'username' : 'email'"
                 :disabled="isSocial"
                 @blur="touched.account = true"
               />
               <p v-if="touched.account && inlineErrors.account" class="helper helper-error">
                 {{ inlineErrors.account }}
               </p>
-              <p v-if="isSocial" class="helper">Auto-filled from your Google/Apple account.</p>
+              <p v-if="isSocial" class="helper">Auto-filled for your Google/Apple account.</p>
             </div>
 
             <div class="field">
@@ -192,8 +192,9 @@
           </div>
           <div class="verify-meta">
             <span v-if="verification.remaining > 0">
-              Expires in {{ verification.remaining }}s
+              Resend available in {{ verification.remaining }}s
             </span>
+            <span v-else>Didn&apos;t get the code?</span>
             <button
               type="button"
               class="btn-link"
@@ -214,6 +215,13 @@
           <p class="disclaimer">
             Fitness AI Planner is not a medical service. Always consult healthcare professionals when making decisions about training or nutrition.
           </p>
+          <p class="legal-copy">
+            By creating an account, you agree to the
+            <RouterLink to="/terms">Terms</RouterLink>,
+            acknowledge the <RouterLink to="/privacy">Privacy Policy</RouterLink>,
+            and confirm you have read the
+            <RouterLink to="/disclaimer">Health &amp; AI Disclaimer</RouterLink>.
+          </p>
           <div>
             Already a member?
             <RouterLink to="/login">Sign in</RouterLink>
@@ -233,7 +241,6 @@ const router = useRouter() // 获取路由
 const route = useRoute()
 const auth = useAuthStore() // 获取鉴权仓库
 const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000' // 鉴权服务地址
-auth.init() // 初始化会话
 auth.error = null // 清空错误
 
 // 注册表单数据
@@ -321,12 +328,13 @@ const inlineErrors = computed(() => {
   }
   const account = form.account?.trim?.() || ''
   if (!account) {
-    map.account = 'Please enter your account or email.'
-  } else if (!emailPattern.test(account) && !usernamePattern.test(account)) {
-    map.account = 'Please enter a valid account (email or 6+ chars with upper, lower, digits).'
-  }
-  if (isSocial.value && !form.account) {
-    map.account = 'Account is required.'
+    map.account = isSocial.value ? 'Please enter a username.' : 'Please enter your email address.'
+  } else if (isSocial.value) {
+    if (!usernamePattern.test(account)) {
+      map.account = 'Please enter a valid username (6+ chars with upper, lower, digits).'
+    }
+  } else if (!emailPattern.test(account)) {
+    map.account = 'Please enter a valid email address.'
   }
   if (!isSocial.value) {
     if (!form.password) {
@@ -402,6 +410,18 @@ onMounted(async () => {
   }
 })
 
+watch(
+  () => route.query.mode,
+  async (mode) => {
+    if (String(mode || '') !== 'confirm') return
+    const sessionUser = await auth.hydrateFromSupabaseSession()
+    if (!sessionUser?.id) return
+    pendingPayload.value = null
+    await router.replace('/onboarding')
+  },
+  { immediate: true }
+)
+
 async function onSubmit() {
   touched.name = true
   touched.account = true
@@ -453,7 +473,7 @@ async function onSubmit() {
 
   const payload = {
     account: form.account,
-    email: form.email,
+    email: isSocial.value ? form.email : form.account,
     name: form.name,
     password: form.password,
     confirm: form.confirm,
@@ -465,15 +485,17 @@ async function onSubmit() {
   pendingPayload.value = payload
   const result = await auth.beginLocalRegistration(payload)
   if (!result?.ok) return
-  verification.email = result.deliveryTarget || form.email || form.account
-  verification.notice = result.notice || 'Verification code created.'
-  if (result.debugCode) {
-    verification.notice = `${verification.notice} Dev code: ${result.debugCode}`
+  if (result.verified) {
+    pendingPayload.value = null
+    router.push('/onboarding')
+    return
   }
+  verification.email = result.deliveryTarget || form.email || form.account
+  verification.notice = result.notice || 'Verification code sent.'
   verification.code = ''
   verification.error = ''
   verification.touched = false
-  verification.remaining = Number(result.expiresIn || 60)
+  verification.remaining = Number(result.resendIn || 60)
   step.value = 'verify'
   startVerifyTimer(verification.remaining)
 }
@@ -483,7 +505,8 @@ function startVerifyTimer(initialSeconds = 60) {
     clearInterval(verifyTimer)
     verifyTimer = null
   }
-  verification.remaining = Math.max(1, Number(initialSeconds) || 60)
+  verification.remaining = Math.max(0, Number(initialSeconds) || 60)
+  if (!verification.remaining) return
   verifyTimer = setInterval(() => {
     verification.remaining -= 1
     if (verification.remaining <= 0) {
@@ -503,17 +526,14 @@ async function sendVerificationCode() {
     verification.error = 'Missing registration details. Please start again.'
     return
   }
-  const result = await auth.beginLocalRegistration(pendingPayload.value)
+  const result = await auth.beginLocalRegistration(pendingPayload.value, { resend: true })
   if (!result?.ok) {
     verification.error = auth.error || 'Failed to resend verification code.'
     return
   }
   verification.email = result.deliveryTarget || verification.email
-  verification.notice = result.notice || 'Verification code created.'
-  if (result.debugCode) {
-    verification.notice = `${verification.notice} Dev code: ${result.debugCode}`
-  }
-  verification.remaining = Number(result.expiresIn || 60)
+  verification.notice = result.notice || 'Verification code resent.'
+  verification.remaining = Number(result.resendIn || 60)
   startVerifyTimer(verification.remaining)
 }
 
@@ -524,17 +544,14 @@ async function confirmVerification() {
     verification.error = 'Please enter the verification code.'
     return
   }
-  if (verification.remaining <= 0) {
-    verification.error = 'Code expired. Please resend.'
-    return
-  }
   if (!pendingPayload.value) {
     verification.error = 'Missing registration details. Please start again.'
     return
   }
   const ok = await auth.confirmLocalRegistration({
     account: pendingPayload.value.account,
-    code: verification.code
+    code: verification.code,
+    profile: pendingPayload.value
   })
   if (!ok) return
   pendingPayload.value = null
@@ -549,20 +566,20 @@ async function confirmVerification() {
   color: #1d1d1f;
   display: grid;
   place-items: center;
-  padding: 80px 24px;
+  padding: 56px 24px;
   font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
 }
 
 .auth-container {
-  width: min(980px, 100%);
+  width: min(880px, 100%);
   display: block;
-  padding: 64px 72px;
+  padding: 44px 48px;
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(20px);
-  border-radius: 36px;
+  border-radius: 30px;
   border: 1px solid rgba(210, 210, 215, 0.45);
   box-shadow:
-    0 40px 80px rgba(17, 17, 17, 0.08),
+    0 28px 56px rgba(17, 17, 17, 0.075),
     inset 0 1px rgba(255, 255, 255, 0.35),
     inset 0 -1px rgba(17, 17, 17, 0.08);
 }
@@ -570,38 +587,38 @@ async function confirmVerification() {
 .auth-card {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 
 .card-header h2 {
   margin: 0;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 600;
 }
 
 .card-header p {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: #6e6e73;
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .form {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
   align-items: start;
 }
 
 .field {
   display: grid;
   align-content: start;
-  gap: 6px;
-  min-height: 106px;
+  gap: 5px;
+  min-height: 92px;
 }
 
 .field-span-2 {
@@ -609,16 +626,16 @@ async function confirmVerification() {
 }
 
 .field label {
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.03em;
   color: #6e6e73;
 }
 
 .field input {
   border: 1px solid rgba(210, 210, 215, 0.8);
-  border-radius: 16px;
-  padding: 16px 20px;
-  font-size: 16px;
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-size: 15px;
   background: rgba(255, 255, 255, 0.8);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -631,9 +648,9 @@ async function confirmVerification() {
 
 .helper {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: #6e6e73;
-  min-height: 20px;
+  min-height: 18px;
   line-height: 1.45;
 }
 
@@ -647,18 +664,18 @@ async function confirmVerification() {
 
 .segmented {
   display: inline-flex;
-  padding: 6px;
+  padding: 5px;
   border-radius: 999px;
   background: rgba(210, 210, 215, 0.25);
-  gap: 6px;
+  gap: 5px;
 }
 
 .segment {
   border: none;
   border-radius: 999px;
-  padding: 8px 18px;
+  padding: 7px 16px;
   background: transparent;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #6e6e73;
   cursor: pointer;
@@ -672,15 +689,15 @@ async function confirmVerification() {
 
 .error {
   margin: -4px 0 0;
-  font-size: 14px;
+  font-size: 13px;
   color: #d70015;
 }
 
 .submit {
   border: none;
-  border-radius: 18px;
-  padding: 14px;
-  font-size: 17px;
+  border-radius: 16px;
+  padding: 13px;
+  font-size: 16px;
   font-weight: 600;
   color: #fff;
   background: linear-gradient(145deg, #111, #2d2d2f);
@@ -739,10 +756,10 @@ async function confirmVerification() {
 }
 
 .card-footer {
-  font-size: 15px;
+  font-size: 14px;
   color: #6e6e73;
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .card-footer a {
@@ -762,9 +779,17 @@ async function confirmVerification() {
   line-height: 1.5;
 }
 
+.legal-copy {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #6e6e73;
+}
+
 @media (max-width: 960px) {
   .auth-container {
-    padding: 48px 32px;
+    width: min(760px, 100%);
+    padding: 36px 28px;
   }
 }
 

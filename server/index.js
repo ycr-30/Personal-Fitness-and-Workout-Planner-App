@@ -28,6 +28,10 @@ const {
   APPLE_REDIRECT_URI,
   SUPABASE_URL = '',
   SUPABASE_SERVICE_ROLE_KEY = '',
+  RESEND_API_KEY = '',
+  RESEND_FROM_EMAIL = '',
+  RESEND_FROM_NAME = 'Fitness AI Planner',
+  RESEND_REPLY_TO = '',
   AI_CHAT_API_URL = '',
   AI_CHAT_API_KEY = '',
   AI_CHAT_API_FORMAT = 'custom',
@@ -144,9 +148,14 @@ const PRODUCT_HELP_DOCS = [
       'Typical release flow: verify locally (frontend + backend), push to GitHub, set production env vars (database and AI endpoints), run migrations on production database, then deploy frontend and backend.'
   }
 ]
+const ANALYTICS_DIRTY_TEXT_RE = /\b(?:WORKOUT ADVICE|NUTRITION ADVICE|Draft response|Key conclusions?|Risks?\s*\/\s*bottlenecks?|Next\s*7[- ]day action plan|Sources?)\b/i
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/
 const USERNAME_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/
 const LEGACY_VERIFICATION_TTL_MS = 10 * 60 * 1000
+const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000
+const VERIFICATION_MAX_ATTEMPTS = 5
+const RESET_TOKEN_TTL_MS = 10 * 60 * 1000
+const RESEND_API_ORIGIN = 'https://api.resend.com'
 const scryptAsync = promisify(scrypt)
 
 function normalizeDatabaseUrl(rawUrl) {
@@ -205,6 +214,51 @@ function normalizeNumber(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+const AI_AGENT_TYPES = new Set(['chat', 'analytics', 'nutrition'])
+
+function normalizeAiAgentType(value) {
+  const text = String(value || '').trim().toLowerCase()
+  return AI_AGENT_TYPES.has(text) ? text : ''
+}
+
+function normalizeLatencyMs(value) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isInteger(parsed) || parsed < 0) return null
+  return Math.min(parsed, 10 * 60 * 1000)
+}
+
+function normalizeAiAgentErrorMessage(value) {
+  const text = String(value || '').trim()
+  return text ? text.slice(0, 500) : null
+}
+
+async function recordAiAgentRun({
+  userId = null,
+  agentType = '',
+  success = false,
+  usedFallback = false,
+  latencyMs = null,
+  errorMessage = null
+} = {}) {
+  const normalizedAgentType = normalizeAiAgentType(agentType)
+  if (!normalizedAgentType) return
+
+  try {
+    await prisma.aiAgentRun.create({
+      data: {
+        userId: Number.isInteger(userId) && userId > 0 ? userId : null,
+        agentType: normalizedAgentType,
+        success: Boolean(success),
+        usedFallback: Boolean(usedFallback),
+        latencyMs: normalizeLatencyMs(latencyMs),
+        errorMessage: normalizeAiAgentErrorMessage(errorMessage)
+      }
+    })
+  } catch (error) {
+    console.error('Failed to record AI agent run', error)
+  }
+}
+
 function toIsoString(value) {
   if (!value) return null
   const date = value instanceof Date ? value : new Date(value)
@@ -235,6 +289,137 @@ async function verifyPasswordSecret(password, salt, expectedHash) {
 
 function createVerificationCode() {
   return String(Math.floor(100000 + Math.random() * 900000))
+}
+
+function createTemporaryResetToken() {
+  return randomBytes(24).toString('hex')
+}
+
+function hashOpaqueToken(token) {
+  return createHash('sha256').update(String(token || '')).digest('hex')
+}
+
+function normalizePurpose(value) {
+  const purpose = String(value || '').trim().toUpperCase()
+  if (purpose === 'LOGIN_CODE' || purpose === 'RESET_PASSWORD' || purpose === 'REGISTRATION') {
+    return purpose
+  }
+  return 'REGISTRATION'
+}
+
+function extractRequestMetadata(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '')
+    .split(',')
+    .map((part) => part.trim())
+    .find(Boolean)
+  return {
+    ipAddress: normalizeOptionalText(forwarded || req.ip || req.socket?.remoteAddress || null),
+    userAgent: normalizeOptionalText(req.headers['user-agent'])
+  }
+}
+
+function buildVerificationEmailTemplate({ code, purpose }) {
+  const normalizedPurpose = normalizePurpose(purpose)
+  if (normalizedPurpose === 'RESET_PASSWORD') {
+    return {
+      subject: 'Reset your Fitness AI Planner password',
+      text: [
+        `Your verification code is: ${code}`,
+        'This code will expire in 10 minutes.',
+        'If you did not request a password reset, you can ignore this email.',
+        '',
+        'For security, do not share this code with anyone.'
+      ].join('\n'),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
+          <p>Your verification code is: <strong style="font-size:20px;letter-spacing:2px">${code}</strong></p>
+          <p>This code will expire in 10 minutes.</p>
+          <p>If you did not request a password reset, you can ignore this email.</p>
+          <p style="color:#6b7280;font-size:13px">For security, do not share this code with anyone.</p>
+        </div>
+      `
+    }
+  }
+
+  return {
+    subject: 'Your Fitness AI Planner sign-in code',
+    text: [
+      `Your verification code is: ${code}`,
+      'This code will expire in 10 minutes.',
+      'If you did not request this code, you can ignore this email.'
+    ].join('\n'),
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
+        <p>Your verification code is: <strong style="font-size:20px;letter-spacing:2px">${code}</strong></p>
+        <p>This code will expire in 10 minutes.</p>
+        <p>If you did not request this code, you can ignore this email.</p>
+      </div>
+    `
+  }
+}
+
+async function sendVerificationEmailOrFallback({ email, code, purpose }) {
+  try {
+    return await sendVerificationEmail({ email, code, purpose })
+  } catch (error) {
+    if (process.env.NODE_ENV === 'production') {
+      throw error
+    }
+    console.error('Verification email delivery failed, using development fallback', error)
+    return {
+      delivered: false,
+      provider: 'debug',
+      error: error?.message || 'Failed to send verification email.'
+    }
+  }
+}
+
+async function sendVerificationEmail({ email, code, purpose }) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  if (!normalizedEmail || !EMAIL_PATTERN.test(normalizedEmail)) {
+    return {
+      delivered: false,
+      provider: 'debug'
+    }
+  }
+
+  if (!RESEND_API_KEY || !RESEND_FROM_EMAIL) {
+    return {
+      delivered: false,
+      provider: 'debug'
+    }
+  }
+
+  const template = buildVerificationEmailTemplate({ code, purpose })
+  const payload = {
+    from: RESEND_FROM_NAME
+      ? `${RESEND_FROM_NAME} <${RESEND_FROM_EMAIL}>`
+      : RESEND_FROM_EMAIL,
+    to: [normalizedEmail],
+    subject: template.subject,
+    html: template.html,
+    text: template.text
+  }
+  if (RESEND_REPLY_TO) payload.reply_to = RESEND_REPLY_TO
+
+  const response = await fetch(`${RESEND_API_ORIGIN}/emails`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  })
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(body || 'Failed to send verification email.')
+  }
+
+  return {
+    delivered: true,
+    provider: 'resend'
+  }
 }
 
 function normalizeLocalRegistrationPayload(payload = {}) {
@@ -370,21 +555,294 @@ async function localAccountExists({ accountKey, email }) {
   return !!existingRows?.length
 }
 
-async function loadLatestVerification(accountKey) {
+async function findLatestVerificationRecord({ email = '', purpose = 'REGISTRATION', accountKey = '' } = {}) {
+  const normalizedEmail = normalizeOptionalEmail(email)
   const normalizedAccountKey = normalizeAccountKey(accountKey)
-  if (!normalizedAccountKey) return null
+  const normalizedPurpose = normalizePurpose(purpose)
+  if (!normalizedEmail && !normalizedAccountKey) return null
+
   const rows = await prisma.$queryRawUnsafe(
     `
       select *
-      from public.legacy_local_auth_verifications
-      where account_key = $1
-        and consumed_at is null
+      from public.auth_verification_codes
+      where purpose = $1
+        and (
+          ($2::text is not null and email = $2)
+          or
+          ($3::text is not null and account_key = $3)
+        )
       order by created_at desc
       limit 1
     `,
+    normalizedPurpose,
+    normalizedEmail,
     normalizedAccountKey
   )
   return rows?.[0] || null
+}
+
+async function findLatestActiveVerificationRecord({ email = '', purpose = 'REGISTRATION', accountKey = '' } = {}) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  const normalizedAccountKey = normalizeAccountKey(accountKey)
+  const normalizedPurpose = normalizePurpose(purpose)
+  if (!normalizedEmail && !normalizedAccountKey) return null
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      select *
+      from public.auth_verification_codes
+      where purpose = $1
+        and consumed_at is null
+        and expires_at > now()
+        and (
+          ($2::text is not null and email = $2)
+          or
+          ($3::text is not null and account_key = $3)
+        )
+      order by created_at desc
+      limit 1
+    `,
+    normalizedPurpose,
+    normalizedEmail,
+    normalizedAccountKey
+  )
+  return rows?.[0] || null
+}
+
+async function invalidateVerificationRecords({ email = '', purpose = 'REGISTRATION', accountKey = '' } = {}) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  const normalizedAccountKey = normalizeAccountKey(accountKey)
+  const normalizedPurpose = normalizePurpose(purpose)
+  if (!normalizedEmail && !normalizedAccountKey) return
+
+  await prisma.$executeRawUnsafe(
+    `
+      update public.auth_verification_codes
+      set consumed_at = now(),
+          updated_at = now()
+      where consumed_at is null
+        and purpose = $1
+        and (
+          ($2::text is not null and email = $2)
+          or
+          ($3::text is not null and account_key = $3)
+        )
+    `,
+    normalizedPurpose,
+    normalizedEmail,
+    normalizedAccountKey
+  )
+}
+
+async function assertVerificationRateLimit({ email = '', purpose = 'REGISTRATION', accountKey = '', ipAddress = '' } = {}) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  const normalizedAccountKey = normalizeAccountKey(accountKey)
+  const normalizedPurpose = normalizePurpose(purpose)
+
+  const latest = await findLatestVerificationRecord({
+    email: normalizedEmail,
+    purpose: normalizedPurpose,
+    accountKey: normalizedAccountKey
+  })
+  if (latest?.created_at) {
+    const elapsed = Date.now() - new Date(latest.created_at).getTime()
+    if (elapsed < VERIFICATION_RESEND_COOLDOWN_MS) {
+      const err = new Error('Too many requests. Please try again later.')
+      err.statusCode = 429
+      err.retryAfterSeconds = Math.ceil((VERIFICATION_RESEND_COOLDOWN_MS - elapsed) / 1000)
+      throw err
+    }
+  }
+
+  if (normalizedEmail) {
+    const emailRows = await prisma.$queryRawUnsafe(
+      `
+        select count(*)::int as count
+        from public.auth_verification_codes
+        where email = $1
+          and purpose = $2
+          and created_at > now() - interval '10 minutes'
+      `,
+      normalizedEmail,
+      normalizedPurpose
+    )
+    if (Number(emailRows?.[0]?.count || 0) >= 6) {
+      const err = new Error('Too many requests. Please try again later.')
+      err.statusCode = 429
+      throw err
+    }
+  }
+
+  if (ipAddress) {
+    const ipRows = await prisma.$queryRawUnsafe(
+      `
+        select count(*)::int as count
+        from public.auth_verification_codes
+        where ip_address = $1
+          and purpose = $2
+          and created_at > now() - interval '10 minutes'
+      `,
+      ipAddress,
+      normalizedPurpose
+    )
+    if (Number(ipRows?.[0]?.count || 0) >= 12) {
+      const err = new Error('Too many requests. Please try again later.')
+      err.statusCode = 429
+      throw err
+    }
+  }
+}
+
+async function createVerificationRecord({
+  email = '',
+  purpose = 'REGISTRATION',
+  accountKey = '',
+  codeHash = '',
+  expiresAt,
+  payload = {},
+  ipAddress = '',
+  userAgent = ''
+} = {}) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  const normalizedAccountKey = normalizeAccountKey(accountKey)
+  const normalizedPurpose = normalizePurpose(purpose)
+  const latest = await findLatestVerificationRecord({
+    email: normalizedEmail,
+    purpose: normalizedPurpose,
+    accountKey: normalizedAccountKey
+  })
+
+  await invalidateVerificationRecords({
+    email: normalizedEmail,
+    purpose: normalizedPurpose,
+    accountKey: normalizedAccountKey
+  })
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      insert into public.auth_verification_codes
+        (email, purpose, account_key, code_hash, expires_at, resend_count, ip_address, user_agent, payload)
+      values
+        ($1, $2, $3, $4, $5::timestamptz, $6, $7, $8, $9::jsonb)
+      returning *
+    `,
+    normalizedEmail || '',
+    normalizedPurpose,
+    normalizedAccountKey || null,
+    String(codeHash || ''),
+    expiresAt instanceof Date ? expiresAt.toISOString() : new Date(expiresAt || Date.now()).toISOString(),
+    latest ? Number(latest.resend_count || 0) + 1 : 0,
+    normalizeOptionalText(ipAddress),
+    normalizeOptionalText(userAgent),
+    JSON.stringify(payload || {})
+  )
+
+  return rows?.[0] || null
+}
+
+async function incrementVerificationAttempt(recordId) {
+  if (!recordId) return
+  await prisma.$executeRawUnsafe(
+    `
+      update public.auth_verification_codes
+      set attempt_count = attempt_count + 1,
+          updated_at = now()
+      where id = $1::uuid
+    `,
+    String(recordId)
+  )
+}
+
+async function consumeVerificationRecord(recordId) {
+  if (!recordId) return
+  await prisma.$executeRawUnsafe(
+    `
+      update public.auth_verification_codes
+      set consumed_at = now(),
+          updated_at = now()
+      where id = $1::uuid
+    `,
+    String(recordId)
+  )
+}
+
+async function invalidatePasswordResetTokens(email) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  if (!normalizedEmail) return
+  await prisma.$executeRawUnsafe(
+    `
+      update public.auth_password_reset_tokens
+      set consumed_at = now(),
+          updated_at = now()
+      where email = $1
+        and consumed_at is null
+    `,
+    normalizedEmail
+  )
+}
+
+async function createPasswordResetToken({ email = '', ipAddress = '', userAgent = '' } = {}) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  if (!normalizedEmail) return null
+
+  await invalidatePasswordResetTokens(normalizedEmail)
+
+  const rawToken = createTemporaryResetToken()
+  const tokenHash = hashOpaqueToken(rawToken)
+  const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS)
+
+  await prisma.$executeRawUnsafe(
+    `
+      insert into public.auth_password_reset_tokens
+        (email, token_hash, expires_at, ip_address, user_agent)
+      values
+        ($1, $2, $3::timestamptz, $4, $5)
+    `,
+    normalizedEmail,
+    tokenHash,
+    expiresAt.toISOString(),
+    normalizeOptionalText(ipAddress),
+    normalizeOptionalText(userAgent)
+  )
+
+  return {
+    rawToken,
+    expiresAt
+  }
+}
+
+async function findActivePasswordResetToken({ email = '', rawToken = '' } = {}) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  const tokenHash = hashOpaqueToken(rawToken)
+  if (!normalizedEmail || !rawToken) return null
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      select *
+      from public.auth_password_reset_tokens
+      where email = $1
+        and token_hash = $2
+        and consumed_at is null
+        and expires_at > now()
+      order by created_at desc
+      limit 1
+    `,
+    normalizedEmail,
+    tokenHash
+  )
+  return rows?.[0] || null
+}
+
+async function consumePasswordResetToken(recordId) {
+  if (!recordId) return
+  await prisma.$executeRawUnsafe(
+    `
+      update public.auth_password_reset_tokens
+      set consumed_at = now(),
+          updated_at = now()
+      where id = $1::uuid
+    `,
+    String(recordId)
+  )
 }
 
 async function resolveClientStateIdentity(req) {
@@ -606,10 +1064,31 @@ function normalizeListParam(value) {
     .filter(Boolean)
 }
 
+function normalizeBigIntId(value) {
+  if (typeof value === 'bigint') return value
+  if (typeof value === 'number' && Number.isInteger(value)) return BigInt(value)
+  const text = String(value || '').trim()
+  if (!text || !/^\d+$/.test(text)) return null
+  try {
+    return BigInt(text)
+  } catch (error) {
+    return null
+  }
+}
+
+function serializeId(value) {
+  if (typeof value === 'bigint') {
+    const asNumber = Number(value)
+    if (Number.isSafeInteger(asNumber)) return asNumber
+    return value.toString()
+  }
+  return value
+}
+
 function formatExercisePayload(exercise) {
   const equipments = exercise.equipments?.map((item) => item.equipment?.name).filter(Boolean) || []
   return {
-    id: exercise.id,
+    id: serializeId(exercise.id),
     name: exercise.name,
     slug: exercise.slug,
     difficulty: exercise.difficulty,
@@ -618,7 +1097,7 @@ function formatExercisePayload(exercise) {
     media: exercise.media,
     primaryMuscle: exercise.primaryMuscle
       ? {
-          id: exercise.primaryMuscle.id,
+          id: serializeId(exercise.primaryMuscle.id),
           name: exercise.primaryMuscle.name,
           slug: exercise.primaryMuscle.slug,
           regionId: exercise.primaryMuscle.regionId,
@@ -634,7 +1113,7 @@ app.get('/api/muscles', async (req, res) => {
     const muscles = await prisma.muscle.findMany({ orderBy: { name: 'asc' } })
     res.json(
       muscles.map((muscle) => ({
-        id: muscle.id,
+        id: serializeId(muscle.id),
         name: muscle.name,
         slug: muscle.slug,
         side: muscle.side,
@@ -652,7 +1131,7 @@ app.get('/api/equipments', async (req, res) => {
     const equipments = await prisma.equipment.findMany({ orderBy: { name: 'asc' } })
     res.json(
       equipments.map((equipment) => ({
-        id: equipment.id,
+        id: serializeId(equipment.id),
         name: equipment.name,
         slug: equipment.slug
       }))
@@ -667,7 +1146,7 @@ app.get('/api/exercises', async (req, res) => {
   try {
     const muscle = typeof req.query.muscle === 'string' ? req.query.muscle.trim() : ''
     const equipmentFilters = normalizeListParam(req.query.equipments)
-    const muscleId = Number(muscle)
+    const muscleId = normalizeBigIntId(muscle)
 
     const where = {}
     if (muscle) {
@@ -675,7 +1154,7 @@ app.get('/api/exercises', async (req, res) => {
         { primaryMuscle: { slug: muscle } },
         { primaryMuscle: { name: { equals: muscle, mode: 'insensitive' } } }
       ]
-      if (Number.isFinite(muscleId) && muscleId > 0) {
+      if (muscleId) {
         where.OR.push({ primaryMuscleId: muscleId })
       }
     }
@@ -712,8 +1191,8 @@ app.get('/api/exercises', async (req, res) => {
 })
 
 app.get('/api/exercises/:id', async (req, res) => {
-  const id = Number(req.params.id)
-  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid exercise id' })
+  const id = normalizeBigIntId(req.params.id)
+  if (!id) return res.status(400).json({ error: 'Invalid exercise id' })
   try {
     const exercise = await prisma.exercise.findUnique({
       where: { id },
@@ -1425,6 +1904,59 @@ async function requestChatCompletion({ messages, user, ragChunks, ragContextText
   return extractAssistantContent(payload)
 }
 
+function buildAnalyticsApiUrl() {
+  const endpoint = String(AI_CHAT_API_URL || '').trim()
+  if (!endpoint) return ''
+  try {
+    const url = new URL(endpoint)
+    if (/\/chat\/?$/i.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/chat\/?$/i, '/analytics/insight')
+    } else {
+      url.pathname = `${url.pathname.replace(/\/$/, '')}/analytics/insight`
+    }
+    url.search = ''
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
+async function requestAnalyticsInsight({ summary, rangeDays, snapshotVersion, userProfile }) {
+  const endpoint = buildAnalyticsApiUrl()
+  if (!endpoint) {
+    throw new Error('Analytics insight endpoint is not configured.')
+  }
+
+  const headers = { 'Content-Type': 'application/json' }
+  if (AI_CHAT_API_KEY) {
+    headers.Authorization = `Bearer ${AI_CHAT_API_KEY}`
+  }
+
+  const response = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        summary,
+        range_days: rangeDays,
+        snapshot_version: snapshotVersion,
+        user_profile: userProfile || null
+      })
+    },
+    CHAT_REQUEST_TIMEOUT_MS,
+    'Analytics insight request'
+  )
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || `Analytics insight endpoint error: ${response.status}`)
+  }
+
+  const payload = await response.json().catch(() => ({}))
+  return payload?.insight || null
+}
+
 async function generateAssistantReply({ userMessage, user, history, userId }) {
   const retrievalStartedAt = Date.now()
   const semanticChunks = await retrieveRagChunks(userMessage)
@@ -1492,12 +2024,164 @@ function numericValue(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-function buildHeuristicAnalyticsInsight(summary, rangeDays) {
+function formatAnalyticsTimeRange(rangeDays) {
+  return `Last ${rangeDays} days`
+}
+
+function buildAnalyticsSnapshotVersion(summary, rangeDays) {
+  return createHash('sha256')
+    .update(JSON.stringify({ rangeDays, summary: summary || {} }))
+    .digest('hex')
+    .slice(0, 16)
+}
+
+function normalizeAnalyticsText(value) {
+  return normalizeMessageText(value)
+    .replace(/\s+/g, ' ')
+    .replace(/^[•\-]\s*/, '')
+    .trim()
+}
+
+function hasDirtyAnalyticsText(value) {
+  const text = normalizeAnalyticsText(value)
+  return Boolean(text) && ANALYTICS_DIRTY_TEXT_RE.test(text)
+}
+
+function uniqueAnalyticsItems(values = []) {
+  const seen = new Set()
+  const items = []
+  for (const value of values) {
+    const key = String(value).toLowerCase()
+    if (!value || seen.has(key)) continue
+    seen.add(key)
+    items.push(value)
+  }
+  return items
+}
+
+function normalizeAnalyticsList(value, limit = 3) {
+  const source = Array.isArray(value) ? value : typeof value === 'string' ? value.split('\n') : []
+  const cleaned = source
+    .map((item) => normalizeAnalyticsText(item))
+    .filter((item) => item && !hasDirtyAnalyticsText(item))
+  return uniqueAnalyticsItems(cleaned).slice(0, limit)
+}
+
+function normalizeAnalyticsConfidence(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'high' || normalized === 'medium') return normalized
+  return 'low'
+}
+
+function supportsNutritionAnalytics(summary) {
+  const goal = String(summary?.goal?.primary || '').trim().toLowerCase()
+  const intakeKcal = numericValue(summary?.nutrition?.intakeKcal, 0)
+  const deficitKcal = numericValue(summary?.nutrition?.deficitKcal, 0)
+  const intakeNote = normalizeAnalyticsText(summary?.nutrition?.intakeNote || '')
+  const hasGoal = goal === 'fat-loss' || goal === 'muscle-gain' || goal === 'maintenance'
+  const hasData = intakeKcal > 0 || Math.abs(deficitKcal) > 0 || Boolean(intakeNote)
+  return hasGoal && hasData
+}
+
+function assessAnalyticsDataState(summary) {
+  const sessions = numericValue(summary?.totals?.sessions, 0)
+  const totalMinutes = numericValue(summary?.totals?.minutes, 0)
+  const weightRecords = Array.isArray(summary?.body?.weightRecords) ? summary.body.weightRecords.length : 0
+  const bodyFatRecords = Array.isArray(summary?.body?.bodyFatRecords) ? summary.body.bodyFatRecords.length : 0
+  const circumferenceRecords = Array.isArray(summary?.body?.circumference) ? summary.body.circumference.length : 0
+  const sparseSessions = sessions < 2 || totalMinutes < 30
+  const sparseBody = weightRecords < 2 && bodyFatRecords < 2 && circumferenceRecords < 2
+  return {
+    sessions,
+    totalMinutes,
+    weightRecords,
+    bodyFatRecords,
+    circumferenceRecords,
+    sparseSessions,
+    sparseBody,
+    insufficientData: sparseSessions || sparseBody
+  }
+}
+
+function normalizeAnalyticsInsightPayload(payload, { rangeDays, snapshotVersion }) {
+  if (!payload || typeof payload !== 'object') return null
+
+  const keyInsight = normalizeAnalyticsText(payload.keyInsight || '')
+  if (!keyInsight || hasDirtyAnalyticsText(keyInsight)) return null
+
+  const risks = normalizeAnalyticsList(payload.risks, 3)
+  const next7Days = normalizeAnalyticsList(payload.next7Days, 3)
+  const confidence = normalizeAnalyticsConfidence(payload.confidence)
+
+  return {
+    keyInsight,
+    risks,
+    next7Days,
+    confidence,
+    insufficientData: Boolean(payload.insufficientData),
+    basedOn: {
+      timeRange: formatAnalyticsTimeRange(rangeDays),
+      snapshotVersion
+    }
+  }
+}
+
+function buildLowDataAnalyticsInsight(summary, rangeDays, snapshotVersion) {
+  const dataState = assessAnalyticsDataState(summary)
+  const pendingSessions = numericValue(summary?.totals?.pending, 0)
+  const risks = []
+  const next7Days = []
+  const missingWeightEntries = Math.max(0, 2 - dataState.weightRecords)
+  const missingBodyFatEntries = Math.max(0, 2 - dataState.bodyFatRecords)
+
+  if (dataState.sparseSessions) {
+    risks.push('Training consistency is still too sparse for a reliable performance read.')
+    next7Days.push(
+      rangeDays <= 7
+        ? 'Log 2 completed workouts on separate days this week.'
+        : 'Log 2 completed workouts in separate weeks to unlock a reliable trend.'
+    )
+  }
+
+  if (dataState.weightRecords < 2) {
+    next7Days.push(`Record ${missingWeightEntries} more weigh-in${missingWeightEntries === 1 ? '' : 's'} to unlock a weight trend.`)
+  } else if (dataState.bodyFatRecords < 2) {
+    next7Days.push(`Record ${missingBodyFatEntries} more body fat ${missingBodyFatEntries === 1 ? 'entry' : 'entries'} to unlock a body fat trend.`)
+  } else if (dataState.circumferenceRecords < 2) {
+    next7Days.push('Record 1 more circumference measurement to unlock a comparison trend.')
+  }
+
+  if (pendingSessions > 0 && next7Days.length < 3) {
+    next7Days.push('Convert 1 pending session into a completed workout.')
+  }
+
+  if (dataState.sparseBody) {
+    risks.push('Body-metric coverage is too thin to confirm physical change yet.')
+  }
+
+  return {
+    keyInsight: `Only ${dataState.sessions} session${dataState.sessions === 1 ? '' : 's'} and ${dataState.totalMinutes} total minutes are logged in ${formatAnalyticsTimeRange(rangeDays).toLowerCase()}, so this insight is based on limited data.`,
+    risks: risks.slice(0, 3),
+    next7Days: uniqueAnalyticsItems(next7Days).slice(0, 3),
+    confidence: 'low',
+    insufficientData: true,
+    basedOn: {
+      timeRange: formatAnalyticsTimeRange(rangeDays),
+      snapshotVersion
+    }
+  }
+}
+
+function buildStructuredAnalyticsFallback(summary, rangeDays, snapshotVersion) {
   const totals = summary?.totals || {}
   const streaks = summary?.streaks || {}
   const challenges = Array.isArray(summary?.challenges) ? summary.challenges : []
   const muscles = Array.isArray(summary?.muscles) ? summary.muscles : []
-  const weightTrend = summary?.weight?.trend || null
+  const weightRecords = Array.isArray(summary?.body?.weightRecords) ? summary.body.weightRecords : []
+  const latestWeight = weightRecords.length ? numericValue(weightRecords[weightRecords.length - 1]?.value, 0) : null
+  const previousWeight = weightRecords.length > 1 ? numericValue(weightRecords[weightRecords.length - 2]?.value, 0) : null
+  const weightChange =
+    latestWeight != null && previousWeight != null ? Number((latestWeight - previousWeight).toFixed(1)) : null
 
   const sessions = numericValue(totals.sessions, 0)
   const completionRate = numericValue(totals.completionRate, 0)
@@ -1505,81 +2189,65 @@ function buildHeuristicAnalyticsInsight(summary, rangeDays) {
   const avgDailyMinutes = numericValue(totals.avgDailyMinutes, 0)
   const currentStreak = numericValue(streaks.current, 0)
   const bestStreak = numericValue(streaks.best, 0)
-  const weightChange = numericValue(weightTrend?.changeKg, 0)
-
-  const strongChallenges = challenges
-    .filter((item) => numericValue(item.progressPercent, 0) >= 100)
-    .map((item) => item.title)
-    .slice(0, 2)
+  const pendingSessions = numericValue(totals.pending, 0)
+  const topFocus = muscles[0]?.name || 'general training'
+  const weeklyMinutesTarget = 180
 
   const weakChallenges = challenges
     .filter((item) => numericValue(item.progressPercent, 0) > 0 && numericValue(item.progressPercent, 0) < 70)
     .map((item) => item.title)
     .slice(0, 2)
 
-  const topFocus = muscles[0]?.name || 'General training'
-  const minutesTarget = rangeDays >= 30 ? 180 : 150
-
-  const conclusion = []
-  conclusion.push(
-    `Key conclusions: In the last ${rangeDays} days, you logged ${sessions} sessions with a ${completionRate}% completion rate and ${totalMinutes} total minutes.`
-  )
-  conclusion.push(
-    `Your current streak is ${currentStreak} days (best ${bestStreak} days), and your top focus area was ${topFocus}.`
-  )
-  if (weightTrend) {
-    const weightText =
-      weightChange > 0 ? `up ${weightChange.toFixed(1)} kg` : weightChange < 0 ? `down ${Math.abs(weightChange).toFixed(1)} kg` : 'stable'
-    conclusion.push(`Weight trend is ${weightText} versus the previous period.`)
-  }
-
   const risks = []
   if (completionRate < 65) {
-    risks.push('Completion is below target. Session scheduling or workload may be too aggressive.')
+    risks.push('Completion is below target, so the current workload or schedule may be too aggressive.')
   }
   if (avgDailyMinutes < 20) {
-    risks.push('Daily movement volume is low for progression. Consistency is the main bottleneck.')
-  }
-  if (!risks.length) {
-    risks.push('No major red flags, but maintain progression and recovery balance.')
+    risks.push('Daily movement volume is low for progression, so consistency is the main bottleneck.')
   }
   if (weakChallenges.length) {
-    risks.push(`Low adherence challenges: ${weakChallenges.join(', ')}.`)
+    risks.push(`Lowest-adherence targets right now: ${weakChallenges.join(', ')}.`)
   }
 
-  const actions = []
-  actions.push(`Training: lock at least 4 planned training days and target ${minutesTarget}+ minutes per week.`)
-  actions.push('Recovery: keep one full rest day and include 1 lighter session after high-intensity days.')
-  actions.push('Nutrition: prioritize protein each meal and keep hydration steady around workouts.')
-  if (strongChallenges.length) {
-    actions.push(`Keep momentum on strong metrics: ${strongChallenges.join(', ')}.`)
+  const next7Days = []
+  if (pendingSessions > 0) {
+    next7Days.push('Convert at least 1 pending session into a completed workout by midweek.')
   }
-  if (weakChallenges.length) {
-    actions.push(`For the next 7 days, focus first on improving: ${weakChallenges.join(', ')}.`)
+  if (totalMinutes < weeklyMinutesTarget) {
+    next7Days.push(`Reach ${weeklyMinutesTarget} training minutes across at least 3 logged sessions this week.`)
+  }
+  if (weightRecords.length < 2) {
+    next7Days.push('Record 1 more weigh-in to unlock a weight comparison.')
+  }
+  if (supportsNutritionAnalytics(summary) && next7Days.length < 3) {
+    const goal = String(summary?.goal?.primary || '').trim().toLowerCase()
+    if (goal === 'fat-loss') {
+      next7Days.push('Keep a moderate calorie deficit and log intake on at least 5 days this week.')
+    } else if (goal === 'muscle-gain') {
+      next7Days.push('Support training days with a logged calorie surplus and keep protein consistent each day.')
+    } else {
+      next7Days.push('Keep calorie intake steady across the week and log meals on your busiest training days.')
+    }
   }
 
-  return [
-    conclusion.join(' '),
-    '',
-    `Risks / bottlenecks: ${risks.join(' ')}`,
-    '',
-    `Next 7-day action plan: ${actions.join(' ')}`
-  ].join('\n')
-}
+  const weightClause =
+    weightChange == null
+      ? 'No previous comparison is available for body weight yet.'
+      : weightChange === 0
+        ? 'Body weight is stable versus the previous comparable entry.'
+        : `Body weight is ${weightChange > 0 ? 'up' : 'down'} ${Math.abs(weightChange).toFixed(1)} kg versus the previous comparable entry.`
 
-function buildAnalyticsPrompt(summary, rangeDays) {
-  const summaryText = JSON.stringify(summary || {})
-  const trimmedSummary = summaryText.length > 4500 ? `${summaryText.slice(0, 4500)}...` : summaryText
-  return [
-    'You are a senior fitness performance analyst for KeepFit.',
-    `Analyze the following user training summary for the last ${rangeDays} days.`,
-    'Return concise, practical guidance in exactly three sections:',
-    '1) Key conclusions',
-    '2) Risks / bottlenecks',
-    '3) Next 7-day action plan (training, nutrition, recovery)',
-    'Use concrete numbers from the summary and do not mention missing model endpoints or retrieval internals.',
-    `Summary JSON:\n${trimmedSummary}`
-  ].join('\n\n')
+  return {
+    keyInsight: `In ${formatAnalyticsTimeRange(rangeDays).toLowerCase()}, you logged ${sessions} sessions, completed ${completionRate}% of planned work, and accumulated ${totalMinutes} total minutes. Your current streak is ${currentStreak} days (best ${bestStreak}), and ${weightClause} Top focus area: ${topFocus}.`,
+    risks: risks.slice(0, 3),
+    next7Days: uniqueAnalyticsItems(next7Days).slice(0, 3),
+    confidence: sessions >= 4 ? 'medium' : 'low',
+    insufficientData: false,
+    basedOn: {
+      timeRange: formatAnalyticsTimeRange(rangeDays),
+      snapshotVersion
+    }
+  }
 }
 
 async function findOrCreateUser(profile) {
@@ -1587,6 +2255,30 @@ async function findOrCreateUser(profile) {
     typeof profile.email === 'string' && profile.email.trim()
       ? profile.email.trim().toLowerCase()
       : null
+  const normalizedSex =
+    String(profile.sex || '').trim().toLowerCase() === 'male'
+      ? 'male'
+      : String(profile.sex || '').trim().toLowerCase() === 'female'
+        ? 'female'
+        : undefined
+  const normalizedBirthday = profile.birthday ? new Date(profile.birthday) : undefined
+  const normalizedHeightCm = profile.heightCm !== undefined ? normalizeNumber(profile.heightCm) : undefined
+  const normalizedWeightKg = profile.weightKg !== undefined ? normalizeNumber(profile.weightKg) : undefined
+  const updateData = {
+    email: normalizedEmail ?? undefined,
+    name: profile.name ?? undefined,
+    avatar: profile.avatar ?? undefined,
+    username: profile.username ?? undefined,
+    sex: normalizedSex,
+    birthday: normalizedBirthday,
+    heightCm: normalizedHeightCm,
+    weightKg: normalizedWeightKg,
+    onboardingCompleted:
+      typeof profile.onboardingCompleted === 'boolean'
+        ? profile.onboardingCompleted
+        : undefined,
+    onboardingAnswers: profile.onboardingAnswers ?? undefined
+  }
 
   const existing = await prisma.user.findUnique({
     where: {
@@ -1600,11 +2292,7 @@ async function findOrCreateUser(profile) {
   if (existing) {
     const updated = await prisma.user.update({
       where: { id: existing.id },
-      data: {
-        email: normalizedEmail ?? existing.email,
-        name: profile.name ?? existing.name,
-        avatar: profile.avatar ?? existing.avatar
-      }
+      data: updateData
     })
     return { user: updated, created: false }
   }
@@ -1621,9 +2309,8 @@ async function findOrCreateUser(profile) {
         data: {
           provider: profile.provider,
           providerId: profile.providerId,
-          email: normalizedEmail,
-          name: profile.name ?? existingByEmail.name,
-          avatar: profile.avatar ?? existingByEmail.avatar
+          ...updateData,
+          email: normalizedEmail
         }
       })
       return { user: linked, created: false }
@@ -1636,12 +2323,64 @@ async function findOrCreateUser(profile) {
       providerId: profile.providerId,
       email: normalizedEmail,
       name: profile.name ?? null,
-      avatar: profile.avatar ?? null
+      avatar: profile.avatar ?? null,
+      username: profile.username ?? null,
+      sex: normalizedSex ?? null,
+      birthday: normalizedBirthday ?? null,
+      heightCm: normalizedHeightCm ?? null,
+      weightKg: normalizedWeightKg ?? null,
+      onboardingCompleted: Boolean(profile.onboardingCompleted),
+      onboardingAnswers: profile.onboardingAnswers ?? null
     }
   })
   return { user: createdUser, created: true }
 }
 
+function buildSupabaseServerProfile(authUser) {
+  const metadata = authUser?.user_metadata && typeof authUser.user_metadata === 'object'
+    ? authUser.user_metadata
+    : {}
+  const displayName =
+    normalizeOptionalText(metadata.full_name || metadata.name) ||
+    normalizeOptionalText(authUser?.email?.split?.('@')?.[0]) ||
+    'User'
+
+  return {
+    provider: 'supabase',
+    providerId: String(authUser?.id || ''),
+    email: authUser?.email || null,
+    name: displayName,
+    avatar: normalizeOptionalText(metadata.avatar_url),
+    username: normalizeOptionalText(metadata.username),
+    sex: normalizeOptionalText(metadata.sex),
+    birthday: normalizeOptionalText(metadata.birthday),
+    heightCm: metadata.height_cm ?? metadata.height ?? null,
+    weightKg: metadata.weight_kg ?? metadata.weight ?? null
+  }
+}
+
+app.post('/auth/supabase/session', async (req, res) => {
+  try {
+    const accessToken = getBearerToken(req)
+    const authUser = await getSupabaseAuthUser(accessToken)
+    const { user } = await findOrCreateUser(buildSupabaseServerProfile(authUser))
+    const sessionUser = buildLocalSessionUser(user, {
+      account: authUser.email || user.email || authUser.id,
+      email: authUser.email || user.email || null
+    })
+    const session = issueSession(sessionUser)
+    setSessionCookie(res, session)
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error('Supabase session sync failed', err)
+    return res.status(Number(err?.statusCode) || 401).json({
+      error: err?.message || 'Failed to create backend session from Supabase auth.'
+    })
+  }
+})
+
+// Legacy local registration endpoints retained for older clients.
+// The current web frontend signs up with Supabase Auth email/password + OTP verification.
 app.post('/auth/local/send-verification', async (req, res) => {
   try {
     const normalized = normalizeLocalRegistrationPayload(req.body || {})
@@ -1657,14 +2396,14 @@ app.post('/auth/local/send-verification', async (req, res) => {
     const verificationCodeHash = hashVerificationCode(verificationCode)
     const passwordSecret = await hashPasswordSecret(normalized.password)
     const expiresAt = new Date(Date.now() + LEGACY_VERIFICATION_TTL_MS)
+    const { ipAddress, userAgent } = extractRequestMetadata(req)
 
-    await prisma.$executeRawUnsafe(
-      `
-        delete from public.legacy_local_auth_verifications
-        where account_key = $1
-      `,
-      normalized.accountKey
-    )
+    await assertVerificationRateLimit({
+      email: normalized.email,
+      purpose: 'REGISTRATION',
+      accountKey: normalized.accountKey,
+      ipAddress
+    })
 
     const registrationPayload = {
       account: normalized.account,
@@ -1675,39 +2414,47 @@ app.post('/auth/local/send-verification', async (req, res) => {
       birthday: normalized.birthday,
       height: normalized.height,
       weight: normalized.weight,
-      avatar: normalized.avatar
+      avatar: normalized.avatar,
+      passwordHash: passwordSecret.hash,
+      passwordSalt: passwordSecret.salt
     }
 
-    await prisma.$executeRawUnsafe(
-      `
-        insert into public.legacy_local_auth_verifications
-          (account, account_key, email, verification_code_hash, password_hash, password_salt, registration_payload, expires_at)
-        values
-          ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz)
-      `,
-      normalized.account,
-      normalized.accountKey,
-      normalized.email,
-      verificationCodeHash,
-      passwordSecret.hash,
-      passwordSecret.salt,
-      JSON.stringify(registrationPayload),
-      expiresAt.toISOString()
-    )
+    await createVerificationRecord({
+      email: normalized.email || normalized.accountKey,
+      purpose: 'REGISTRATION',
+      accountKey: normalized.accountKey,
+      codeHash: verificationCodeHash,
+      expiresAt,
+      ipAddress,
+      userAgent,
+      payload: registrationPayload
+    })
+
+    const delivery = await sendVerificationEmailOrFallback({
+      email: normalized.email,
+      code: verificationCode,
+      purpose: 'REGISTRATION'
+    })
 
     return res.json({
       ok: true,
       deliveryTarget: normalized.email || normalized.account,
       expiresIn: Math.floor(LEGACY_VERIFICATION_TTL_MS / 1000),
+      resendIn: Math.floor(VERIFICATION_RESEND_COOLDOWN_MS / 1000),
       debugCode: process.env.NODE_ENV === 'production' ? undefined : verificationCode,
       notice:
-        process.env.NODE_ENV === 'production'
-          ? 'Verification code generated.'
-          : 'Verification code generated in cloud state. Local development returns the code directly.'
+        delivery.delivered
+          ? 'Verification code sent.'
+          : process.env.NODE_ENV === 'production'
+            ? 'Verification code generated.'
+            : 'Verification code generated in cloud state. Email delivery was skipped in development, so the code is shown directly.'
     })
   } catch (err) {
     console.error('Local verification send failed', err)
-    return res.status(400).json({ error: err?.message || 'Failed to create verification state.' })
+    return res.status(err?.statusCode || 400).json({
+      error: err?.message || 'Failed to create verification state.',
+      retryAfter: err?.retryAfterSeconds || undefined
+    })
   }
 })
 
@@ -1721,7 +2468,11 @@ app.post('/auth/local/confirm-registration', async (req, res) => {
       return res.status(400).json({ error: 'Account and verification code are required.' })
     }
 
-    const verification = await loadLatestVerification(accountKey)
+    const verification = await findLatestActiveVerificationRecord({
+      email: accountKey,
+      purpose: 'REGISTRATION',
+      accountKey
+    })
     if (!verification) {
       return res.status(404).json({ error: 'No verification request was found for this account.' })
     }
@@ -1731,13 +2482,20 @@ app.post('/auth/local/confirm-registration', async (req, res) => {
     if (new Date(verification.expires_at).getTime() < Date.now()) {
       return res.status(400).json({ error: 'Verification code expired. Please resend.' })
     }
-    if (hashVerificationCode(code) !== String(verification.verification_code_hash || '')) {
+    if (Number(verification.attempt_count || 0) >= VERIFICATION_MAX_ATTEMPTS) {
+      return res.status(429).json({ error: 'Too many attempts. Please request a new code.' })
+    }
+    if (hashVerificationCode(code) !== String(verification.code_hash || '')) {
+      await incrementVerificationAttempt(verification.id)
       return res.status(400).json({ error: 'Incorrect verification code.' })
     }
 
-    const payload = verification.registration_payload && typeof verification.registration_payload === 'object'
-      ? verification.registration_payload
+    const payload = verification.payload && typeof verification.payload === 'object'
+      ? verification.payload
       : {}
+    if (!payload.passwordHash || !payload.passwordSalt) {
+      return res.status(400).json({ error: 'Verification payload is incomplete. Please resend the code.' })
+    }
     const email = normalizeOptionalEmail(payload.email)
     const accountLabel = normalizeLocalAccount(payload.account) || account
     const username = EMAIL_PATTERN.test(accountLabel) ? null : accountLabel
@@ -1781,19 +2539,11 @@ app.post('/auth/local/confirm-registration', async (req, res) => {
       accountLabel,
       accountKey,
       email,
-      String(verification.password_hash || ''),
-      String(verification.password_salt || '')
+      String(payload.passwordHash || ''),
+      String(payload.passwordSalt || '')
     )
 
-    await prisma.$executeRawUnsafe(
-      `
-        update public.legacy_local_auth_verifications
-        set consumed_at = now(),
-            updated_at = now()
-        where id = $1::uuid
-      `,
-      String(verification.id)
-    )
+    await consumeVerificationRecord(verification.id)
 
     const sessionUser = buildLocalSessionUser(createdUser, {
       account: accountLabel,
@@ -1812,6 +2562,8 @@ app.post('/auth/local/confirm-registration', async (req, res) => {
   }
 })
 
+// Legacy local password login endpoint retained for older clients.
+// The current web frontend signs in with Supabase Auth `signInWithPassword`.
 app.post('/auth/local/login', async (req, res) => {
   try {
     const identifier = normalizeLocalAccount(req.body?.identifier)
@@ -1867,6 +2619,184 @@ app.post('/auth/local/login', async (req, res) => {
   } catch (err) {
     console.error('Local auth login failed', err)
     return res.status(500).json({ error: err?.message || 'Failed to log in.' })
+  }
+})
+
+// Legacy password-reset endpoints retained temporarily for older clients.
+// The current web frontend uses Supabase Auth recovery instead of these routes.
+const PASSWORD_RESET_GENERIC_RESPONSE = {
+  success: true,
+  message: 'If an account exists for this email, a verification code has been sent.'
+}
+
+app.post('/api/auth/password-reset/send-code', async (req, res) => {
+  try {
+    const email = normalizeOptionalEmail(req.body?.email)
+    if (!email || !EMAIL_PATTERN.test(email)) {
+      return res.status(400).json({ error: 'Invalid email address' })
+    }
+
+    const { ipAddress, userAgent } = extractRequestMetadata(req)
+    await assertVerificationRateLimit({
+      email,
+      purpose: 'RESET_PASSWORD',
+      ipAddress
+    })
+
+    const accountRow = await findLegacyLocalAccountByIdentifier(email)
+    if (!accountRow || !normalizeOptionalEmail(accountRow.email)) {
+      return res.json(PASSWORD_RESET_GENERIC_RESPONSE)
+    }
+
+    const verificationCode = createVerificationCode()
+    const verificationCodeHash = hashVerificationCode(verificationCode)
+    const expiresAt = new Date(Date.now() + LEGACY_VERIFICATION_TTL_MS)
+
+    await createVerificationRecord({
+      email,
+      purpose: 'RESET_PASSWORD',
+      accountKey: accountRow.account_key,
+      codeHash: verificationCodeHash,
+      expiresAt,
+      ipAddress,
+      userAgent,
+      payload: {
+        account: accountRow.account
+      }
+    })
+
+    const delivery = await sendVerificationEmailOrFallback({
+      email,
+      code: verificationCode,
+      purpose: 'RESET_PASSWORD'
+    })
+
+    return res.json({
+      ...PASSWORD_RESET_GENERIC_RESPONSE,
+      resendIn: Math.floor(VERIFICATION_RESEND_COOLDOWN_MS / 1000),
+      expiresIn: Math.floor(LEGACY_VERIFICATION_TTL_MS / 1000),
+      debugCode: process.env.NODE_ENV === 'production' ? undefined : verificationCode,
+      notice:
+        delivery.delivered || process.env.NODE_ENV === 'production'
+          ? PASSWORD_RESET_GENERIC_RESPONSE.message
+          : `${PASSWORD_RESET_GENERIC_RESPONSE.message} Dev code: ${verificationCode}`
+    })
+  } catch (err) {
+    console.error('Password reset send-code failed', err)
+    return res.status(err?.statusCode || 500).json({
+      error: err?.message || 'Failed to send verification code.',
+      retryAfter: err?.retryAfterSeconds || undefined
+    })
+  }
+})
+
+app.post('/api/auth/password-reset/verify-code', async (req, res) => {
+  try {
+    const email = normalizeOptionalEmail(req.body?.email)
+    const code = String(req.body?.code || '').trim()
+    if (!email || !EMAIL_PATTERN.test(email)) {
+      return res.status(400).json({ error: 'Invalid email address' })
+    }
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({ error: 'Invalid verification code' })
+    }
+
+    const verification = await findLatestActiveVerificationRecord({
+      email,
+      purpose: 'RESET_PASSWORD'
+    })
+    if (!verification) {
+      return res.status(400).json({ error: 'Verification code expired' })
+    }
+    if (Number(verification.attempt_count || 0) >= VERIFICATION_MAX_ATTEMPTS) {
+      return res.status(429).json({ error: 'Too many requests. Please try again later.' })
+    }
+
+    if (hashVerificationCode(code) !== String(verification.code_hash || '')) {
+      await incrementVerificationAttempt(verification.id)
+      return res.status(400).json({ error: 'Invalid verification code' })
+    }
+
+    const { ipAddress, userAgent } = extractRequestMetadata(req)
+    await consumeVerificationRecord(verification.id)
+    const resetToken = await createPasswordResetToken({
+      email,
+      ipAddress,
+      userAgent
+    })
+
+    return res.json({
+      success: true,
+      reset_token: resetToken?.rawToken || ''
+    })
+  } catch (err) {
+    console.error('Password reset verify-code failed', err)
+    return res.status(500).json({ error: err?.message || 'Failed to verify code.' })
+  }
+})
+
+app.post('/api/auth/password-reset/confirm', async (req, res) => {
+  try {
+    const email = normalizeOptionalEmail(req.body?.email)
+    const resetToken = String(req.body?.reset_token || '').trim()
+    const newPassword = String(req.body?.new_password || '')
+    const confirmPassword = String(req.body?.confirm_password || '')
+
+    if (!email || !EMAIL_PATTERN.test(email)) {
+      return res.status(400).json({ error: 'Invalid email address' })
+    }
+    if (!resetToken) {
+      return res.status(400).json({ error: 'Reset session expired. Please request a new code.' })
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must meet minimum security requirements' })
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: 'Passwords do not match' })
+    }
+
+    const tokenRecord = await findActivePasswordResetToken({
+      email,
+      rawToken: resetToken
+    })
+    if (!tokenRecord) {
+      return res.status(400).json({ error: 'Reset session expired. Please request a new code.' })
+    }
+
+    const accountRow = await findLegacyLocalAccountByIdentifier(email)
+    if (!accountRow || !normalizeOptionalEmail(accountRow.email)) {
+      return res.status(400).json({ error: 'Reset session expired. Please request a new code.' })
+    }
+
+    const passwordSecret = await hashPasswordSecret(newPassword)
+    await prisma.$executeRawUnsafe(
+      `
+        update public.legacy_local_auth_accounts
+        set password_hash = $1,
+            password_salt = $2,
+            updated_at = now()
+        where email = $3
+      `,
+      passwordSecret.hash,
+      passwordSecret.salt,
+      email
+    )
+
+    await consumePasswordResetToken(tokenRecord.id)
+    await invalidatePasswordResetTokens(email)
+    await invalidateVerificationRecords({
+      email,
+      purpose: 'RESET_PASSWORD'
+    })
+    clearSessionCookie(res)
+
+    return res.json({
+      success: true,
+      message: 'Password updated. You can now sign in with your new password.'
+    })
+  } catch (err) {
+    console.error('Password reset confirm failed', err)
+    return res.status(500).json({ error: err?.message || 'Failed to update password.' })
   }
 })
 
@@ -2239,6 +3169,116 @@ app.post('/api/user/app-state', requireAuth, async (req, res) => {
   }
 })
 
+app.post('/api/ai/agent-runs', requireAuth, async (req, res) => {
+  const userId = Number(req.session.id)
+  const agentType = normalizeAiAgentType(req.body?.agentType)
+
+  if (!agentType) {
+    return res.status(400).json({ error: 'Invalid agentType.' })
+  }
+
+  await recordAiAgentRun({
+    userId,
+    agentType,
+    success: Boolean(req.body?.success),
+    usedFallback: Boolean(req.body?.usedFallback),
+    latencyMs: req.body?.latencyMs,
+    errorMessage: req.body?.errorMessage
+  })
+
+  return res.json({ ok: true })
+})
+
+app.get('/api/ai/agent-stats', requireAuth, async (req, res) => {
+  const requestedDays = Number.parseInt(req.query.days, 10)
+  const days =
+    Number.isInteger(requestedDays) && requestedDays > 0
+      ? Math.min(Math.max(requestedDays, 1), 90)
+      : 7
+  const scope = String(req.query.scope || 'global').trim().toLowerCase() === 'me' ? 'me' : 'global'
+  const userId = scope === 'me' ? Number(req.session.id) : null
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+
+  try {
+    const overallRows = await prisma.$queryRawUnsafe(
+      `
+        select
+          count(*)::int as total,
+          count(*) filter (where success)::int as success_count,
+          count(*) filter (where not success)::int as failure_count,
+          count(*) filter (where used_fallback)::int as fallback_count,
+          count(*) filter (where success and not used_fallback)::int as direct_ai_count
+        from public.ai_agent_runs
+        where created_at >= $1
+          and ($2::int is null or user_id = $2)
+      `,
+      since,
+      Number.isInteger(userId) && userId > 0 ? userId : null
+    )
+
+    const agentRows = await prisma.$queryRawUnsafe(
+      `
+        select
+          agent_type,
+          count(*)::int as total,
+          count(*) filter (where success)::int as success_count,
+          count(*) filter (where not success)::int as failure_count,
+          count(*) filter (where used_fallback)::int as fallback_count,
+          count(*) filter (where success and not used_fallback)::int as direct_ai_count
+        from public.ai_agent_runs
+        where created_at >= $1
+          and ($2::int is null or user_id = $2)
+        group by agent_type
+        order by agent_type asc
+      `,
+      since,
+      Number.isInteger(userId) && userId > 0 ? userId : null
+    )
+
+    const overallRow = overallRows?.[0] || {}
+    const overallTotal = Number(overallRow.total || 0)
+    const overallSuccess = Number(overallRow.success_count || 0)
+    const overallFailure = Number(overallRow.failure_count || 0)
+    const overallFallback = Number(overallRow.fallback_count || 0)
+    const overallDirectAi = Number(overallRow.direct_ai_count || 0)
+
+    return res.json({
+      ok: true,
+      scope,
+      days,
+      overall: {
+        total: overallTotal,
+        successCount: overallSuccess,
+        failureCount: overallFailure,
+        fallbackCount: overallFallback,
+        directAiCount: overallDirectAi,
+        successRate: overallTotal ? overallSuccess / overallTotal : 0
+      },
+      agents: Array.isArray(agentRows)
+        ? agentRows.map((row) => {
+            const total = Number(row.total || 0)
+            const successCount = Number(row.success_count || 0)
+            const failureCount = Number(row.failure_count || 0)
+            const fallbackCount = Number(row.fallback_count || 0)
+            const directAiCount = Number(row.direct_ai_count || 0)
+            return {
+              agentType: String(row.agent_type || ''),
+              total,
+              successCount,
+              failureCount,
+              fallbackCount,
+              directAiCount,
+              successRate: total ? successCount / total : 0
+            }
+          })
+        : []
+    })
+  } catch (err) {
+    console.error('Failed to load AI agent stats', err)
+    return res.status(500).json({ error: 'Failed to load AI agent stats.' })
+  }
+})
+
 app.get('/api/ai/chat/conversations', requireAuth, async (req, res) => {
   try {
     const userId = Number(req.session.id)
@@ -2348,6 +3388,7 @@ app.post('/api/ai/chat/messages', requireAuth, async (req, res) => {
   const userId = Number(req.session.id)
   const conversationId = normalizeConversationId(req.body?.conversationId)
   const message = normalizeMessageText(req.body?.message)
+  const startedAt = Date.now()
 
   if (!message) {
     return res.status(400).json({ error: 'Message is required' })
@@ -2422,6 +3463,14 @@ app.post('/api/ai/chat/messages', requireAuth, async (req, res) => {
       }
     })
 
+    await recordAiAgentRun({
+      userId,
+      agentType: 'chat',
+      success: Boolean(String(assistantMessage?.content || '').trim()),
+      usedFallback: Boolean(assistantReply.usedFallback),
+      latencyMs: Date.now() - startedAt
+    })
+
     res.json({
       ok: true,
       conversationId: conversation.id,
@@ -2434,6 +3483,14 @@ app.post('/api/ai/chat/messages', requireAuth, async (req, res) => {
     })
   } catch (err) {
     console.error('Failed to send AI chat message', err)
+    await recordAiAgentRun({
+      userId,
+      agentType: 'chat',
+      success: false,
+      usedFallback: false,
+      latencyMs: Date.now() - startedAt,
+      errorMessage: err?.message || 'Failed to send message.'
+    })
     res.status(500).json({ error: 'Failed to send message' })
   }
 })
@@ -2443,56 +3500,106 @@ app.post('/api/ai/analytics/insights', requireAuth, async (req, res) => {
   if (!Number.isInteger(userId) || userId <= 0) {
     return res.status(400).json({ error: 'Invalid user session.' })
   }
-
-  const requestedRange = Number.parseInt(req.body?.rangeDays, 10)
-  const rangeDays =
-    Number.isInteger(requestedRange) && requestedRange > 0
-      ? Math.min(Math.max(requestedRange, 7), 180)
-      : 30
-  const summary = req.body?.summary && typeof req.body.summary === 'object' ? req.body.summary : {}
-
-  const fallbackInsight = buildHeuristicAnalyticsInsight(summary, rangeDays)
-  let insight = fallbackInsight
-  let source = 'heuristic'
-  let usedFallback = true
+  const startedAt = Date.now()
 
   try {
-    const user = await findUserById(userId)
-    const prompt = buildAnalyticsPrompt(summary, rangeDays)
-    const assistantReply = await generateAssistantReply({
-      userMessage: prompt,
-      user,
-      history: [],
-      userId
-    })
-    const aiContent = normalizeMessageText(assistantReply?.content || '')
-    const looksGenericFallback =
-      /retrieval fallback|model endpoint not connected|saved your message/i.test(aiContent)
+    const requestedRange = Number.parseInt(req.body?.rangeDays, 10)
+    const rangeDays =
+      Number.isInteger(requestedRange) && requestedRange > 0
+        ? Math.min(Math.max(requestedRange, 7), 180)
+        : 30
+    const summary = req.body?.summary && typeof req.body.summary === 'object' ? req.body.summary : {}
+    const requestedSnapshotVersion = normalizeAnalyticsText(req.body?.snapshotVersion || '')
+    const snapshotVersion = requestedSnapshotVersion || buildAnalyticsSnapshotVersion(summary, rangeDays)
+    const dataState = assessAnalyticsDataState(summary)
 
-    if (aiContent && !assistantReply?.usedFallback && !looksGenericFallback) {
-      insight = aiContent
-      source = 'ai'
-      usedFallback = false
-    } else if (aiContent && !looksGenericFallback) {
-      insight = aiContent
-      source = 'ai_fallback'
-      usedFallback = true
+    let insight = dataState.insufficientData
+      ? buildLowDataAnalyticsInsight(summary, rangeDays, snapshotVersion)
+      : buildStructuredAnalyticsFallback(summary, rangeDays, snapshotVersion)
+    let source = dataState.insufficientData ? 'low_data' : 'heuristic_fallback'
+    let usedFallback = true
+    let unavailable = false
+
+    if (!dataState.insufficientData) {
+      try {
+        const user = await findUserById(userId)
+        const agentInsight = await requestAnalyticsInsight({
+          summary,
+          rangeDays,
+          snapshotVersion,
+          userProfile: user
+            ? {
+                id: user.id,
+                email: user.email || null,
+                name: user.name || null,
+                sex: user.sex || null,
+                heightCm: user.heightCm ?? null,
+                weightKg: user.weightKg ?? null,
+                onboardingAnswers: user.onboardingAnswers ?? null
+              }
+            : null
+        })
+        const normalizedInsight = normalizeAnalyticsInsightPayload(agentInsight, {
+          rangeDays,
+          snapshotVersion
+        })
+
+        if (normalizedInsight) {
+          insight = normalizedInsight
+          source = 'ai'
+          usedFallback = false
+        } else {
+          insight = null
+          source = 'unavailable'
+          usedFallback = true
+          unavailable = true
+        }
+      } catch (err) {
+        console.error('Failed to generate analytics insights', err)
+      }
     }
-  } catch (err) {
-    console.error('Failed to generate analytics insights', err)
-  }
 
-  return res.json({
-    ok: true,
-    insight,
-    meta: {
-      source,
+    await recordAiAgentRun({
+      userId,
+      agentType: 'analytics',
+      success: Boolean(insight),
       usedFallback,
-      generatedAt: new Date().toISOString()
-    }
-  })
+      latencyMs: Date.now() - startedAt,
+      errorMessage: !insight && unavailable ? 'Analytics insight unavailable.' : null
+    })
+
+    return res.json({
+      ok: true,
+      insight,
+      meta: {
+        source,
+        usedFallback,
+        unavailable,
+        generatedAt: new Date().toISOString()
+      }
+    })
+  } catch (err) {
+    console.error('Failed to generate analytics insight route', err)
+    await recordAiAgentRun({
+      userId,
+      agentType: 'analytics',
+      success: false,
+      usedFallback: false,
+      latencyMs: Date.now() - startedAt,
+      errorMessage: err?.message || 'Failed to generate analytics insight.'
+    })
+    return res.status(500).json({ error: 'Failed to generate analytics insight.' })
+  }
 })
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Auth server running at http://localhost:${PORT}`)
+})
+
+server.on('error', (err) => {
+  if (err?.code === 'EADDRINUSE') {
+    console.error(`Auth server is already running on port ${PORT}. Stop the existing process before starting another one.`)
+    process.exit(1)
+  }
+  throw err
 })

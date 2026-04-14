@@ -375,7 +375,7 @@
         </div>
 
         <div class="consistency-main">
-          <div v-if="isSevenDayRange && !consistencyDisplayHasData" class="consistency-empty-card">
+          <div v-if="!consistencyDisplayHasData" class="consistency-empty-card">
             <p>No workouts logged yet. Start logging to build your consistency map.</p>
             <button class="btn small" type="button" @click="goToLogs">Log workout</button>
           </div>
@@ -441,10 +441,6 @@
             </div>
           </div>
 
-          <p v-if="!isSevenDayRange && !consistencyDisplayHasData" class="consistency-empty-note">
-            No workouts logged yet. Start logging to build your consistency map
-          </p>
-
           <div v-if="consistencyDisplayHasData" class="heatmap-meta">
             <span>{{ consistencyMetaLabel }}</span>
             <span>Based on completed workouts only</span>
@@ -459,7 +455,7 @@
           <p v-if="consistencyDisplayHasData" class="consistency-legend-note">Each square = 1 day. Darker = more sessions.</p>
         </div>
 
-        <section v-if="!isSevenDayRange" class="consistency-weekly-section" aria-label="Weekly active days trend">
+        <section v-if="!isSevenDayRange && consistencyDisplayHasData" class="consistency-weekly-section" aria-label="Weekly active days trend">
           <div class="section-title-row">
             <h3>Weekly active days trend</h3>
           </div>
@@ -550,7 +546,7 @@
           </div>
         </div>
 
-        <div class="volume-axis-layout">
+        <div v-if="volumeHasAnyData" class="volume-axis-layout">
           <div class="volume-y-axis">
             <span>{{ formatVolumeAxisTick(volumeAxisMax) }}</span>
             <span>{{ formatVolumeAxisTick(volumeAxisMid) }}</span>
@@ -589,8 +585,13 @@
             </div>
           </div>
         </div>
-        <p class="dashboard-card-footer-note">{{ volumeHelperText }}</p>
-        <div v-if="volumeSparseState" class="chart-inline-state">
+        <div v-else class="volume-empty-state">
+          <p class="empty">No training volume yet in this range.</p>
+          <p class="empty-subtext">Log a completed workout to start building your volume trend.</p>
+          <button class="btn small" type="button" @click="goToLogs">Log workout</button>
+        </div>
+        <p v-if="volumeHasAnyData" class="dashboard-card-footer-note">{{ volumeHelperText }}</p>
+        <div v-if="volumeSparseState && volumeHasAnyData" class="chart-inline-state">
           <p>{{ volumeSparseState.message }}</p>
           <button class="btn small" type="button" @click="goToLogs">{{ volumeSparseState.actionLabel }}</button>
         </div>
@@ -783,16 +784,35 @@
         <div class="ai-head-actions">
           <span>{{ aiMetaLabel }}</span>
           <button class="btn primary small" type="button" :disabled="aiLoading" @click="fetchAiInsight">
-            {{ aiLoading ? 'Refreshing...' : aiInsight ? 'Refresh insights' : 'Generate insights' }}
+            {{ aiLoading ? 'Refreshing...' : aiInsightReady || aiUnavailable ? 'Refresh insights' : 'Generate insights' }}
           </button>
         </div>
       </div>
       <p v-if="aiError" class="ai-error">{{ aiError }}</p>
-      <div v-else-if="aiInsight" class="ai-summary-grid">
-        <article v-for="section in aiInsightSections" :key="section.id" class="ai-summary-card">
-          <span class="ai-summary-label">{{ section.title }}</span>
-          <p>{{ section.body }}</p>
+      <div v-else-if="aiInsightReady" class="ai-summary-grid">
+        <article class="ai-summary-card">
+          <span class="ai-summary-label">Key Insight</span>
+          <p>{{ aiInsight.keyInsight }}</p>
+          <small v-if="aiInsight.insufficientData" class="ai-summary-note">Low confidence · based on limited data.</small>
         </article>
+        <article class="ai-summary-card">
+          <span class="ai-summary-label">Risks & Bottlenecks</span>
+          <ul v-if="aiInsight.risks.length" class="ai-summary-list">
+            <li v-for="item in aiInsight.risks" :key="item">{{ item }}</li>
+          </ul>
+          <p v-else class="ai-summary-placeholder">No clear risks surfaced for this period.</p>
+        </article>
+        <article class="ai-summary-card">
+          <span class="ai-summary-label">Next 7 Days</span>
+          <ul v-if="aiInsight.next7Days.length" class="ai-summary-list">
+            <li v-for="item in aiInsight.next7Days" :key="item">{{ item }}</li>
+          </ul>
+          <p v-else class="ai-summary-placeholder">Refresh insights after more data is logged.</p>
+        </article>
+      </div>
+      <div v-else-if="aiUnavailable" class="ai-unavailable">
+        <p>Insight unavailable.</p>
+        <button class="btn primary small" type="button" :disabled="aiLoading" @click="fetchAiInsight">Refresh insights</button>
       </div>
       <p v-else class="empty">No AI insight yet. Click "Generate insights" to create one.</p>
     </section>
@@ -931,8 +951,8 @@ const volumeMetric = ref('minutes')
 const selectedStrengthMetric = ref('bench')
 const selectedCircumferenceMetric = ref('waist')
 
-const aiInsight = ref('')
-const aiMeta = ref({ source: '', generatedAt: '' })
+const aiInsight = ref(null)
+const aiMeta = ref(createEmptyAiMeta())
 const aiLoading = ref(false)
 const aiError = ref('')
 const consistencyTooltip = ref({
@@ -1129,53 +1149,61 @@ function createPrimaryDeltaSummary(items = []) {
   }
 }
 
-function splitAiInsightSections(text) {
-  const raw = String(text || '').trim()
-  if (!raw) return []
+function createEmptyAiMeta() {
+  return { source: '', generatedAt: '', unavailable: false }
+}
 
-  const lines = raw
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
+function normalizeAiInsightText(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[•\-]\s*/, '')
+    .trim()
+}
 
-  const sectionRules = [
-    { id: 'insight', title: 'Key Insight', match: /^key conclusions?:\s*/i },
-    { id: 'risks', title: 'Risks & Bottlenecks', match: /^risks?\s*\/\s*bottlenecks?:\s*/i },
-    { id: 'next', title: 'Next 7 Days', match: /^next\s*7[- ]day action plan:\s*/i }
-  ]
+function isDirtyAiInsightText(value) {
+  return /\b(?:WORKOUT ADVICE|NUTRITION ADVICE|Draft response|Key conclusions?|Risks?\s*\/\s*bottlenecks?|Next\s*7[- ]day action plan|Sources?)\b/i.test(
+    normalizeAiInsightText(value)
+  )
+}
 
-  const matched = sectionRules
-    .map((rule) => {
-      const line = lines.find((entry) => rule.match.test(entry))
-      if (!line) return null
-      return {
-        id: rule.id,
-        title: rule.title,
-        body: line.replace(rule.match, '').trim()
-      }
-    })
-    .filter((item) => item?.body)
+function uniqueAiInsightItems(values = []) {
+  const seen = new Set()
+  return values.filter((item) => {
+    const key = String(item).toLowerCase()
+    if (!item || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 
-  if (matched.length) return matched
+function normalizeAiInsightList(value, limit = 3) {
+  const source = Array.isArray(value) ? value : typeof value === 'string' ? value.split('\n') : []
+  return uniqueAiInsightItems(
+    source
+      .map((item) => normalizeAiInsightText(item))
+      .filter((item) => item && !isDirtyAiInsightText(item))
+  ).slice(0, limit)
+}
 
-  const sentences = raw.match(/[^.!?]+[.!?]?/g)?.map((item) => item.trim()).filter(Boolean) || [raw]
-  return [
-    {
-      id: 'insight',
-      title: 'Key Insight',
-      body: sentences[0] || 'Not enough data to summarize yet.'
-    },
-    {
-      id: 'risks',
-      title: 'Risks & Bottlenecks',
-      body: sentences[1] || 'Keep logging more complete training data to surface clearer bottlenecks.'
-    },
-    {
-      id: 'next',
-      title: 'Next 7 Days',
-      body: sentences.slice(2).join(' ') || 'Stay consistent with logging so the next recommendation can be sharper.'
+function normalizeAiInsightPayload(value) {
+  if (!value || typeof value !== 'object') return null
+
+  const keyInsight = normalizeAiInsightText(value.keyInsight || '')
+  if (!keyInsight || isDirtyAiInsightText(keyInsight)) return null
+
+  return {
+    keyInsight,
+    risks: normalizeAiInsightList(value.risks, 3),
+    next7Days: normalizeAiInsightList(value.next7Days, 3),
+    confidence: ['low', 'medium', 'high'].includes(String(value.confidence || '').toLowerCase())
+      ? String(value.confidence).toLowerCase()
+      : 'low',
+    insufficientData: Boolean(value.insufficientData),
+    basedOn: {
+      timeRange: normalizeAiInsightText(value?.basedOn?.timeRange || ''),
+      snapshotVersion: normalizeAiInsightText(value?.basedOn?.snapshotVersion || '')
     }
-  ]
+  }
 }
 
 function buildBodyFatSourceDetail(pointDate = null) {
@@ -1322,14 +1350,7 @@ function loadPlan() {
 function buildAnalyticsSummaryFingerprint(summary, range) {
   return JSON.stringify({
     range,
-    totals: summary?.totals,
-    streaks: summary?.streaks,
-    body: {
-      weightRecords: summary?.body?.weightRecords,
-      bodyFatRecords: summary?.body?.bodyFatRecords
-    },
-    consistency: summary?.consistency,
-    challenges: summary?.challenges
+    summary: summary || {}
   })
 }
 
@@ -1337,8 +1358,8 @@ function loadCachedAiInsight() {
   if (typeof window === 'undefined') return
   const raw = localStorage.getItem(aiInsightKey.value)
   if (!raw) {
-    aiInsight.value = ''
-    aiMeta.value = { source: '', generatedAt: '' }
+    aiInsight.value = null
+    aiMeta.value = createEmptyAiMeta()
     return
   }
   try {
@@ -1346,19 +1367,23 @@ function loadCachedAiInsight() {
     const expectedFingerprint = buildAnalyticsSummaryFingerprint(analyticsSummary.value, rangeDays.value)
     if (parsed?.fingerprint !== expectedFingerprint) {
       localStorage.removeItem(aiInsightKey.value)
-      aiInsight.value = ''
-      aiMeta.value = { source: '', generatedAt: '' }
+      aiInsight.value = null
+      aiMeta.value = createEmptyAiMeta()
       return
     }
-    aiInsight.value = String(parsed?.insight || '').trim()
+    const normalizedInsight = normalizeAiInsightPayload(parsed?.insight)
+    aiInsight.value = normalizedInsight
     aiMeta.value = {
       source: String(parsed?.meta?.source || ''),
-      generatedAt: String(parsed?.meta?.generatedAt || '')
+      generatedAt: String(parsed?.meta?.generatedAt || ''),
+      unavailable:
+        Boolean(parsed?.meta?.unavailable) ||
+        (!normalizedInsight && Boolean(parsed?.insight || parsed?.meta?.source || parsed?.meta?.generatedAt))
     }
   } catch (error) {
     console.error('Failed to parse cached AI insight', error)
-    aiInsight.value = ''
-    aiMeta.value = { source: '', generatedAt: '' }
+    aiInsight.value = null
+    aiMeta.value = createEmptyAiMeta()
   }
 }
 
@@ -1393,14 +1418,18 @@ async function loadCloudAiInsight() {
     if (!payload || typeof payload !== 'object') return
     const expectedFingerprint = buildAnalyticsSummaryFingerprint(analyticsSummary.value, rangeDays.value)
     if (payload?.fingerprint !== expectedFingerprint) {
-      aiInsight.value = ''
-      aiMeta.value = { source: '', generatedAt: '' }
+      aiInsight.value = null
+      aiMeta.value = createEmptyAiMeta()
       return
     }
-    aiInsight.value = String(payload?.insight || '').trim()
+    const normalizedInsight = normalizeAiInsightPayload(payload?.insight)
+    aiInsight.value = normalizedInsight
     aiMeta.value = {
       source: String(payload?.meta?.source || ''),
-      generatedAt: String(payload?.meta?.generatedAt || '')
+      generatedAt: String(payload?.meta?.generatedAt || ''),
+      unavailable:
+        Boolean(payload?.meta?.unavailable) ||
+        (!normalizedInsight && Boolean(payload?.insight || payload?.meta?.source || payload?.meta?.generatedAt))
     }
     if (typeof window !== 'undefined') {
       localStorage.setItem(aiInsightKey.value, JSON.stringify({
@@ -1804,6 +1833,8 @@ const volumePeakText = computed(() => {
   if (metricId === 'sessions') return `${formatVolumeValue(peak, metricId)} sessions peak`
   return `${formatVolumeValue(peak, metricId)} kg peak`
 })
+
+const volumeHasAnyData = computed(() => volumeBars.value.some((item) => item.value > 0))
 
 const volumeSparseState = computed(() => {
   if (isSevenDayRange.value) {
@@ -3385,6 +3416,12 @@ const analyticsSummary = computed(() => ({
     deficitKcal: toNumber(planState.value.dailyLogs?.deficitKcal),
     intakeNote: String(planState.value.dailyLogs?.intakeNote || '').trim()
   },
+  goal: {
+    primary: String(auth.user?.onboarding?.answers?.goal || '').trim(),
+    experience: String(auth.user?.onboarding?.answers?.experience || '').trim(),
+    frequency: String(auth.user?.onboarding?.answers?.frequency || '').trim(),
+    nutrition: String(auth.user?.onboarding?.answers?.nutrition || '').trim()
+  },
   challenges: challengeCards.value.map((item) => ({
     id: item.id,
     title: item.title,
@@ -3394,11 +3431,13 @@ const analyticsSummary = computed(() => ({
     progressPercent: item.progressPercent
   }))
 }))
-
-const aiInsightSections = computed(() => splitAiInsightSections(aiInsight.value))
+const aiInsightReady = computed(() => Boolean(aiInsight.value?.keyInsight))
+const aiUnavailable = computed(() => Boolean(aiMeta.value.unavailable))
 
 const aiMetaLabel = computed(() => {
-  if (!aiMeta.value.generatedAt) return 'Awaiting analysis'
+  if (!aiMeta.value.generatedAt) {
+    return aiUnavailable.value ? 'Insight unavailable' : 'Awaiting analysis'
+  }
   const when = new Date(aiMeta.value.generatedAt)
   const timestamp = Number.isNaN(when.getTime())
     ? aiMeta.value.generatedAt
@@ -3408,7 +3447,8 @@ const aiMetaLabel = computed(() => {
       hour: '2-digit',
       minute: '2-digit'
     }).format(when)
-  return `Last updated · ${timestamp}`
+  const confidenceLabel = aiInsightReady.value ? `${aiInsight.value.confidence} confidence` : ''
+  return ['Last updated', timestamp, confidenceLabel].filter(Boolean).join(' · ')
 })
 
 async function fetchAiInsight() {
@@ -3421,6 +3461,7 @@ async function fetchAiInsight() {
       credentials: 'include',
       body: JSON.stringify({
         rangeDays: rangeDays.value,
+        snapshotVersion: analyticsSummaryFingerprint.value,
         summary: analyticsSummary.value
       })
     })
@@ -3428,10 +3469,14 @@ async function fetchAiInsight() {
     if (!response.ok) {
       throw new Error(payload?.error || 'Failed to generate analytics insight.')
     }
-    aiInsight.value = String(payload?.insight || '').trim()
+    const normalizedInsight = normalizeAiInsightPayload(payload?.insight)
+    aiInsight.value = normalizedInsight
     aiMeta.value = {
       source: payload?.meta?.source || '',
-      generatedAt: payload?.meta?.generatedAt || new Date().toISOString()
+      generatedAt: payload?.meta?.generatedAt || new Date().toISOString(),
+      unavailable:
+        Boolean(payload?.meta?.unavailable) ||
+        (!normalizedInsight && Boolean(payload?.insight || payload?.meta?.source || payload?.meta?.generatedAt))
     }
     saveCachedAiInsight()
   } catch (error) {
@@ -3456,8 +3501,8 @@ function handleNextAction(action) {
 }
 
 watch(analyticsSummaryFingerprint, async () => {
-  aiInsight.value = ''
-  aiMeta.value = { source: '', generatedAt: '' }
+  aiInsight.value = null
+  aiMeta.value = createEmptyAiMeta()
   aiError.value = ''
   loadCachedAiInsight()
   await loadCloudAiInsight()
@@ -3670,6 +3715,8 @@ h1 {
   border-radius: 16px;
   padding: 14px;
   display: grid;
+  grid-template-rows: auto auto minmax(40px, auto) minmax(58px, auto) minmax(34px, auto);
+  align-items: start;
   gap: 4px;
 }
 
@@ -3689,21 +3736,26 @@ h1 {
 
 .stat-delta-main {
   margin-top: 6px;
+  min-height: 58px;
+  display: flex;
+  align-items: flex-start;
 }
 
 .stat-secondary {
   margin: 0;
   font-size: 11px;
+  line-height: 1.35;
   color: var(--text-muted);
 }
 
 .delta-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
+  width: 100%;
+  min-height: 58px;
   max-width: 100%;
-  padding: 4px 8px;
-  border-radius: 999px;
+  padding: 8px 12px;
+  border-radius: 22px;
   background: var(--surface-muted);
   border: 1px solid var(--border);
   font-size: 11px;
@@ -3711,7 +3763,8 @@ h1 {
   line-height: 1.25;
   color: var(--text-muted);
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .delta-chip.up {
@@ -3781,8 +3834,10 @@ h1 {
   background: var(--surface-muted);
   padding: 14px;
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 8px;
   align-content: start;
+  height: 100%;
 }
 
 .action-kicker {
@@ -3802,6 +3857,12 @@ h1 {
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.55;
+}
+
+.action-card .btn.small {
+  align-self: end;
+  width: 100%;
+  justify-content: center;
 }
 
 .inline-tabs {
@@ -5121,6 +5182,16 @@ h1 {
   gap: 12px;
 }
 
+.volume-empty-state {
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  background: var(--surface-muted);
+  padding: 18px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
 .single-point-card {
   display: grid;
   gap: 4px;
@@ -5306,6 +5377,46 @@ h1 {
   font-size: 14px;
 }
 
+.ai-summary-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: #e2e8f0;
+}
+
+.ai-summary-list li {
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.ai-summary-placeholder {
+  color: #cbd5e1;
+  opacity: 0.88;
+}
+
+.ai-summary-note {
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ai-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.ai-unavailable p {
+  margin: 0;
+  color: #e2e8f0;
+}
+
 .ai-error {
   margin: 0;
   padding: 10px 12px;
@@ -5331,6 +5442,227 @@ h1 {
 
 .ai-panel .empty {
   color: #cbd5e1;
+}
+
+@media (min-width: 1280px) {
+  .analytics-page {
+    padding: 28px clamp(18px, 3vw, 36px) 44px;
+    gap: 16px;
+  }
+
+  .analytics-header {
+    gap: 12px;
+  }
+
+  h1 {
+    font-size: clamp(28px, 3vw, 38px);
+  }
+
+  .subtitle {
+    margin-top: 6px;
+  }
+
+  .header-right {
+    gap: 8px;
+  }
+
+  .range-tabs {
+    padding: 3px;
+  }
+
+  .range-tab {
+    padding: 6px 11px;
+  }
+
+  .btn {
+    padding: 9px 12px;
+  }
+
+  .btn.small {
+    padding: 7px 10px;
+  }
+
+  .stat-grid,
+  .actions-grid,
+  .body-grid,
+  .dashboard-grid {
+    gap: 10px;
+  }
+
+  .dashboard-grid {
+    align-items: stretch;
+  }
+
+  .stat-card {
+    padding: 12px;
+    border-radius: 14px;
+    grid-template-rows: auto auto minmax(44px, auto) minmax(60px, auto) minmax(36px, auto);
+  }
+
+  .stat-card strong {
+    font-size: 21px;
+  }
+
+  .panel {
+    padding: 14px;
+    gap: 10px;
+    border-radius: 18px;
+  }
+
+  .panel-head h2,
+  .dashboard-card-head h2 {
+    font-size: 17px;
+  }
+
+  .action-card {
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .mini-panel,
+  .dashboard-card {
+    padding: 14px;
+    gap: 12px;
+    border-radius: 20px;
+  }
+
+  .dashboard-card {
+    height: 100%;
+  }
+
+  .consistency-panel {
+    grid-template-rows: auto 1fr auto;
+  }
+
+  .consistency-main {
+    height: 100%;
+  }
+
+  .consistency-empty-card,
+  .volume-empty-state,
+  .circumference-single-state {
+    height: 100%;
+    align-content: center;
+  }
+
+  .metric-chart-head {
+    gap: 12px;
+  }
+
+  .metric-chart-title-block strong {
+    font-size: 22px;
+  }
+
+  .metric-chart-value-block strong,
+  .trend-compact-value strong,
+  .trend-compact-comparison strong {
+    font-size: 24px;
+  }
+
+  .line-chart svg,
+  .circumference-trend-panel .line-chart svg {
+    height: 148px;
+  }
+
+  .strength-chart svg {
+    height: 212px;
+  }
+
+  .volume-plot {
+    height: 170px;
+    border-radius: 16px;
+  }
+
+  .chart-inline-state,
+  .trend-compact-state,
+  .chart-source-card {
+    padding: 9px 10px;
+  }
+
+  .trend-compact-state {
+    gap: 10px;
+  }
+
+  .volume-axis-layout {
+    gap: 8px;
+  }
+
+  .volume-bars,
+  .volume-x-axis {
+    gap: 8px;
+  }
+
+  .volume-bars {
+    padding: 34px 10px 10px;
+  }
+
+  .volume-bar-col {
+    gap: 6px;
+  }
+
+  .volume-empty-state {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .strength-empty-card {
+    min-height: 252px;
+    padding: 18px;
+  }
+
+  .consistency-strip-wrap {
+    padding: 10px 12px;
+  }
+
+  .consistency-empty-card {
+    min-height: 128px;
+    padding: 16px;
+    gap: 10px;
+    border-radius: 16px;
+  }
+
+  .consistency-empty-card p {
+    font-size: 13px;
+  }
+
+  .consistency-main,
+  .consistency-weekly-section,
+  .circumference-trend {
+    gap: 10px;
+  }
+
+  .consistency-strip {
+    gap: 10px;
+  }
+
+  .consistency-weekly-chart {
+    height: 68px;
+    border-radius: 16px;
+  }
+
+  .consistency-weekly-bars {
+    gap: 6px;
+    padding: 10px;
+  }
+
+  .circumference-summary {
+    border-radius: 16px;
+  }
+
+  .circumference-summary-row {
+    padding: 14px 16px;
+  }
+
+  .circumference-single-state {
+    padding: 14px;
+    gap: 10px;
+    border-radius: 16px;
+  }
+
+  .empty-state {
+    padding-top: 4px;
+    gap: 8px;
+  }
 }
 
 :global(:root[data-theme='dark']) .analytics-page {
@@ -5594,6 +5926,11 @@ h1 {
 
   .range-tab {
     flex: 1;
+  }
+
+  .ai-unavailable {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .dashboard-card {

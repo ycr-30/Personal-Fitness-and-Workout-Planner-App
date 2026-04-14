@@ -195,6 +195,33 @@ import UserMenu from '@/components/UserMenu.vue'
   gap: 0;
 }
 
+@media (min-width: 1280px) {
+  .app-sidebar {
+    padding: 24px 18px 20px;
+    gap: 22px;
+  }
+
+  .brand-logo {
+    width: 196px;
+  }
+
+  .sidebar-nav {
+    gap: 6px;
+  }
+
+  .nav-link {
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+  }
+
+  .nav-link svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
 @media (max-width: 980px) {
   .app-sidebar {
     position: relative;

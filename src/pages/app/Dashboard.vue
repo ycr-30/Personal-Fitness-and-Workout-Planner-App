@@ -87,7 +87,13 @@
     </section>
 
     <section class="dashboard-main">
-      <article class="chart-card">
+      <article
+        class="chart-card"
+        :class="{
+          empty: weightVisibleLogCount === 0,
+          compact: weightVisibleLogCount > 0 && weightVisibleLogCount < 4
+        }"
+      >
         <div class="card-header">
           <div>
             <h2>Weight Progression</h2>
@@ -311,6 +317,60 @@
         <p class="snapshot-status">{{ nutritionStatusLine }}</p>
         <div class="card-actions">
           <button class="btn ghost wide" type="button" @click="openNutrition">Open Nutrition</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="dashboard-tertiary">
+      <article class="agent-success-card">
+        <div class="card-header">
+          <div>
+            <h2>Agent Answer Success</h2>
+            <p>Recorded answer delivery rate across all tracked agent runs</p>
+          </div>
+          <span class="micro-badge">{{ agentStatsRangeLabel }}</span>
+        </div>
+
+        <p v-if="agentStatsError" class="agent-error">{{ agentStatsError }}</p>
+
+        <div v-if="agentStatsHasData" class="agent-summary-grid">
+          <div
+            v-for="item in agentSummaryItems"
+            :key="item.label"
+            class="agent-summary-item"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+            <p>{{ item.helper }}</p>
+          </div>
+        </div>
+
+        <div v-if="agentStatsHasData" class="agent-breakdown-grid">
+          <article
+            v-for="item in agentBreakdownItems"
+            :key="item.agentType"
+            class="agent-breakdown-card"
+          >
+            <div class="agent-breakdown-head">
+              <div>
+                <strong>{{ item.label }}</strong>
+                <p>{{ item.successCount }} success · {{ item.failureCount }} failed</p>
+              </div>
+              <span class="agent-rate">{{ item.successRateLabel }}</span>
+            </div>
+            <div class="agent-bar">
+              <span :style="{ width: `${item.successRatePercent}%` }"></span>
+            </div>
+            <div class="agent-meta">
+              <span>{{ item.total }} total runs</span>
+              <span>{{ item.fallbackCount }} fallback</span>
+            </div>
+          </article>
+        </div>
+
+        <div v-else class="agent-empty">
+          <p v-if="agentStatsLoading">Loading agent performance...</p>
+          <p v-else>No tracked agent runs yet. Use chat, analytics, or nutrition AI to populate this module.</p>
         </div>
       </article>
     </section>
@@ -586,6 +646,14 @@ import { getUserStorageKey } from '@/lib/userStorage'
 import { buildNutritionSummary } from '@/utils/nutritionCalculations'
 import { buildPlanGoalLink } from '@/utils/nutritionGoalMapping'
 
+const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
+const AGENT_STAT_AGENT_ORDER = ['chat', 'analytics', 'nutrition']
+const AGENT_STAT_LABELS = {
+  chat: 'Chat Agent',
+  analytics: 'Analytics Agent',
+  nutrition: 'Nutrition Agent'
+}
+
 const auth = useAuthStore()
 const router = useRouter()
 const firstName = computed(() => auth.user?.name?.split(' ')[0] || 'Alex')
@@ -852,6 +920,26 @@ const nutritionMealEntries = ref([])
 const nutritionWaterEntries = ref([])
 const weeklyWaterDays = ref(0)
 const nutritionError = ref('')
+const agentStatsLoading = ref(false)
+const agentStatsError = ref('')
+
+function createEmptyAgentStats() {
+  return {
+    scope: 'global',
+    days: 7,
+    overall: {
+      total: 0,
+      successCount: 0,
+      failureCount: 0,
+      fallbackCount: 0,
+      directAiCount: 0,
+      successRate: 0
+    },
+    agents: []
+  }
+}
+
+const agentStats = ref(createEmptyAgentStats())
 
 const locationSuggestions = ["Gold's Gym", 'Home', 'Uni Gym']
 const muscleGroupOptions = [
@@ -1096,6 +1184,85 @@ function writeStorageJson(key, value) {
   try {
     window.localStorage.setItem(key, JSON.stringify(value))
   } catch {}
+}
+
+function normalizeStatCount(value) {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0
+}
+
+function normalizeSuccessRate(total, successCount, value) {
+  const parsed = Number(value)
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return Math.min(parsed, 1)
+  }
+  return total ? successCount / total : 0
+}
+
+function normalizeAgentStats(payload) {
+  const overallPayload = payload?.overall && typeof payload.overall === 'object' ? payload.overall : {}
+  const overallTotal = normalizeStatCount(overallPayload.total)
+  const overallSuccess = normalizeStatCount(overallPayload.successCount)
+  const overallFailure = normalizeStatCount(overallPayload.failureCount)
+  const overallFallback = normalizeStatCount(overallPayload.fallbackCount)
+  const overallDirectAi = normalizeStatCount(overallPayload.directAiCount)
+
+  return {
+    scope: String(payload?.scope || 'global').trim().toLowerCase() === 'me' ? 'me' : 'global',
+    days: Math.min(Math.max(normalizeStatCount(payload?.days) || 7, 1), 90),
+    overall: {
+      total: overallTotal,
+      successCount: overallSuccess,
+      failureCount: overallFailure,
+      fallbackCount: overallFallback,
+      directAiCount: overallDirectAi,
+      successRate: normalizeSuccessRate(overallTotal, overallSuccess, overallPayload.successRate)
+    },
+    agents: (Array.isArray(payload?.agents) ? payload.agents : []).map((item) => {
+      const total = normalizeStatCount(item?.total)
+      const successCount = normalizeStatCount(item?.successCount)
+      const failureCount = normalizeStatCount(item?.failureCount)
+      const fallbackCount = normalizeStatCount(item?.fallbackCount)
+      const directAiCount = normalizeStatCount(item?.directAiCount)
+      return {
+        agentType: String(item?.agentType || '').trim().toLowerCase(),
+        total,
+        successCount,
+        failureCount,
+        fallbackCount,
+        directAiCount,
+        successRate: normalizeSuccessRate(total, successCount, item?.successRate)
+      }
+    })
+  }
+}
+
+function formatAgentRate(value) {
+  const percent = Math.round(Math.min(Math.max(Number(value) || 0, 0), 1) * 100)
+  return `${percent}%`
+}
+
+async function refreshAgentStats() {
+  agentStatsLoading.value = true
+
+  try {
+    const response = await fetch(`${AUTH_SERVER_ORIGIN}/api/ai/agent-stats?days=7&scope=global`, {
+      credentials: 'include'
+    })
+
+    if (!response.ok) {
+      throw new Error('Unable to load agent performance right now.')
+    }
+
+    const payload = await response.json()
+    agentStats.value = normalizeAgentStats(payload)
+    agentStatsError.value = ''
+  } catch (error) {
+    agentStats.value = createEmptyAgentStats()
+    agentStatsError.value = error?.message || 'Unable to load agent performance right now.'
+  } finally {
+    agentStatsLoading.value = false
+  }
 }
 
 function startOfWeek(date) {
@@ -1772,6 +1939,61 @@ const nutritionStatusHint = computed(() => {
   return 'Live summary from today’s meals, water entries, and active nutrition targets.'
 })
 
+const agentStatsHasData = computed(() => agentStats.value.overall.total > 0)
+
+const agentStatsRangeLabel = computed(() => `${agentStats.value.days} Days`)
+
+const agentSummaryItems = computed(() => {
+  const overall = agentStats.value.overall
+  return [
+    {
+      label: 'Success rate',
+      value: formatAgentRate(overall.successRate),
+      helper: `${overall.successCount} answered successfully`
+    },
+    {
+      label: 'Total runs',
+      value: String(overall.total),
+      helper: 'Tracked chat, analytics, and nutrition calls'
+    },
+    {
+      label: 'Failed runs',
+      value: String(overall.failureCount),
+      helper: 'Requests that did not deliver an answer'
+    },
+    {
+      label: 'Fallback answers',
+      value: String(overall.fallbackCount),
+      helper: `${overall.directAiCount} delivered directly by AI`
+    }
+  ]
+})
+
+const agentBreakdownItems = computed(() => {
+  const byType = new Map(
+    agentStats.value.agents.map((item) => [item.agentType, item])
+  )
+
+  return AGENT_STAT_AGENT_ORDER.map((agentType) => {
+    const item = byType.get(agentType) || {
+      agentType,
+      total: 0,
+      successCount: 0,
+      failureCount: 0,
+      fallbackCount: 0,
+      directAiCount: 0,
+      successRate: 0
+    }
+
+    return {
+      ...item,
+      label: AGENT_STAT_LABELS[agentType] || agentType,
+      successRateLabel: formatAgentRate(item.successRate),
+      successRatePercent: Math.round(Math.min(Math.max(item.successRate || 0, 0), 1) * 100)
+    }
+  })
+})
+
 const todayFocusItems = computed(() => {
   const summary = dashboardNutritionSummary.value
   const workoutValue = isRestDayToday.value
@@ -1981,12 +2203,14 @@ onMounted(() => {
   loadRestDays()
   loadDashboardNutritionCache()
   refreshDashboardNutrition()
+  refreshAgentStats()
   if (typeof window !== 'undefined') {
     window.addEventListener('storage', handleStorage)
     window.addEventListener('pf_logs_updated', loadLogs)
     window.addEventListener('pf_plan_updated', loadPlan)
     window.addEventListener('pf_nutrition_updated', refreshDashboardNutrition)
     window.addEventListener('pf_rest_updated', loadRestDays)
+    window.addEventListener('pf_ai_agent_run', refreshAgentStats)
     window.addEventListener('click', closeWeightFilterOnOutside)
     window.addEventListener('click', closeTodayMenu)
   }
@@ -1999,6 +2223,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('pf_plan_updated', loadPlan)
     window.removeEventListener('pf_nutrition_updated', refreshDashboardNutrition)
     window.removeEventListener('pf_rest_updated', loadRestDays)
+    window.removeEventListener('pf_ai_agent_run', refreshAgentStats)
     window.removeEventListener('click', closeWeightFilterOnOutside)
     window.removeEventListener('click', closeTodayMenu)
   }
@@ -2512,7 +2737,8 @@ onBeforeUnmount(() => {
 .workout-card,
 .focus-card,
 .goal-progress-card,
-.nutrition-snapshot-card {
+.nutrition-snapshot-card,
+.agent-success-card {
   background: var(--surface);
   border-radius: 22px;
   padding: 22px;
@@ -2660,7 +2886,8 @@ onBeforeUnmount(() => {
 .focus-card,
 .goal-progress-card,
 .nutrition-snapshot-card,
-.workout-card {
+.workout-card,
+.agent-success-card {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -2715,6 +2942,145 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: stretch;
   background: transparent;
+}
+
+.dashboard-tertiary {
+  display: grid;
+  gap: 24px;
+  background: transparent;
+}
+
+.agent-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.agent-summary-item,
+.agent-breakdown-card {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, white);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 96%, transparent),
+      color-mix(in srgb, var(--surface-muted) 92%, transparent)
+    );
+}
+
+.agent-summary-item {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-summary-item span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agent-summary-item strong {
+  font-size: 28px;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.agent-summary-item p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.agent-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.agent-breakdown-card {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-breakdown-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-breakdown-head strong {
+  display: block;
+  margin: 0;
+  font-size: 15px;
+}
+
+.agent-breakdown-head p,
+.agent-meta span,
+.agent-empty p,
+.agent-error {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.agent-rate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-soft) 78%, white);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.agent-bar {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-track) 82%, transparent);
+}
+
+.agent-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+}
+
+.agent-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-empty {
+  margin-top: 4px;
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px dashed color-mix(in srgb, var(--border) 82%, white);
+  background: color-mix(in srgb, var(--surface-muted) 74%, transparent);
+}
+
+.agent-error {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff1f2;
+  color: #be123c;
+  font-weight: 600;
 }
 
 .progress-list {
@@ -3246,6 +3612,11 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
+  .agent-summary-grid,
+  .agent-breakdown-grid {
+    grid-template-columns: 1fr;
+  }
+
   .side-stack {
     grid-template-rows: auto;
   }
@@ -3263,6 +3634,193 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (min-width: 1280px) {
+  .dashboard-page {
+    padding: 28px clamp(18px, 3vw, 36px) 44px;
+    gap: 20px;
+  }
+
+  .dashboard-hero {
+    gap: 14px;
+  }
+
+  .dashboard-hero h1 {
+    font-size: clamp(28px, 3.2vw, 36px);
+  }
+
+  .subtitle {
+    margin-top: 6px;
+  }
+
+  .hero-actions,
+  .stats-grid,
+  .dashboard-main,
+  .dashboard-secondary,
+  .dashboard-tertiary {
+    gap: 12px;
+  }
+
+  .dashboard-main {
+    align-items: stretch;
+  }
+
+  .btn {
+    padding: 9px 14px;
+    border-radius: 12px;
+  }
+
+  .stat-card {
+    padding: 16px;
+    gap: 10px;
+    border-radius: 16px;
+  }
+
+  .stat-card h3 {
+    font-size: 20px;
+  }
+
+  .stat-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .stat-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .chart-card,
+  .workout-card,
+  .focus-card,
+  .goal-progress-card,
+  .nutrition-snapshot-card,
+  .agent-success-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .chart-card {
+    height: 100%;
+  }
+
+  .side-stack {
+    height: 100%;
+  }
+
+  .card-header h2 {
+    font-size: 17px;
+  }
+
+  .chart-area {
+    margin-top: 10px;
+    gap: 6px;
+  }
+
+  .chart-grid {
+    min-height: 188px;
+  }
+
+  .chart-plot svg {
+    min-height: 188px;
+  }
+
+  .chart-card.compact .chart-grid,
+  .chart-card.compact .chart-plot svg {
+    min-height: 166px;
+  }
+
+  .chart-card.empty .chart-grid,
+  .chart-card.empty .chart-plot svg {
+    min-height: 142px;
+  }
+
+  .chart-summary {
+    margin-top: 8px;
+    padding-top: 10px;
+  }
+
+  .side-stack,
+  .focus-list,
+  .progress-list,
+  .snapshot-grid {
+    gap: 12px;
+  }
+
+  .agent-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .agent-summary-item,
+  .agent-breakdown-card {
+    padding: 12px 14px;
+    border-radius: 14px;
+  }
+
+  .agent-summary-item strong {
+    font-size: 24px;
+  }
+
+  .agent-breakdown-grid {
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .focus-list,
+  .progress-list,
+  .snapshot-grid,
+  .workout-list {
+    margin-top: 12px;
+  }
+
+  .focus-item,
+  .snapshot-item {
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .task-meta-row {
+    margin-top: 8px;
+  }
+
+  .workout-list {
+    gap: 8px;
+    max-height: 196px;
+  }
+
+  .workout-item {
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .workout-empty {
+    padding: 8px 2px 0;
+  }
+
+  .index {
+    width: 28px;
+    height: 28px;
+    border-radius: 10px;
+  }
+
+  .check-toggle {
+    width: 26px;
+    height: 26px;
+  }
+
+  .card-actions,
+  .card-actions.split {
+    padding-top: 10px;
+  }
+
+  .section-note,
+  .snapshot-status {
+    margin-top: 12px;
+  }
+}
+
 @media (max-width: 720px) {
   .dashboard-hero {
     align-items: flex-start;
@@ -3270,6 +3828,16 @@ onBeforeUnmount(() => {
 
   .snapshot-grid {
     grid-template-columns: 1fr;
+  }
+
+  .agent-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-meta,
+  .agent-breakdown-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .progress-topline,
