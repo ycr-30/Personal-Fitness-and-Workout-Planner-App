@@ -174,7 +174,7 @@
               <button type="button" class="email-otp-close" @click="closePasswordReset">×</button>
               <div class="email-otp-header">
                 <h3>Reset password</h3>
-                <p v-if="passwordReset.step !== 'success'">We’ll send a 6-digit verification code to your email.</p>
+                <p v-if="passwordReset.step !== 'success'">We’ll send a password reset link to your email.</p>
                 <p v-if="passwordReset.step !== 'success'" class="helper reset-scope-note">
                   Only available for password-based accounts. Google sign-in and email-code sign-in do not use passwords.
                 </p>
@@ -200,7 +200,7 @@
                   :disabled="loading || !!passwordResetEmailError"
                   @click="sendPasswordResetCode"
                 >
-                  <span v-if="!loading">Send code</span>
+                  <span v-if="!loading">Send reset link</span>
                   <span v-else>Sending…</span>
                 </button>
                 <p v-if="passwordReset.notice" class="helper">{{ passwordReset.notice }}</p>
@@ -210,26 +210,14 @@
                 </button>
               </template>
 
-              <template v-else-if="passwordReset.step === 'code'">
-                <div class="field">
-                  <label for="reset-code">Verification code</label>
-                  <input
-                    id="reset-code"
-                    v-model.trim="passwordReset.code"
-                    type="text"
-                    inputmode="numeric"
-                    maxlength="6"
-                    placeholder="Enter 6-digit code"
-                    @blur="passwordReset.touchedCode = true"
-                  />
-                  <p v-if="passwordReset.touchedCode && passwordResetCodeError" class="helper helper-error">
-                    {{ passwordResetCodeError }}
-                  </p>
-                </div>
+              <template v-else-if="passwordReset.step === 'sent'">
+                <p class="helper">
+                  Open the password reset email sent to <strong>{{ passwordReset.email }}</strong> and use the reset link to return here.
+                </p>
                 <div class="email-otp-row">
                   <span class="email-otp-timer">
-                    <template v-if="passwordReset.remaining > 0">Resend code in {{ passwordReset.remaining }}s</template>
-                    <template v-else>Didn't get the code?</template>
+                    <template v-if="passwordReset.remaining > 0">Resend link in {{ passwordReset.remaining }}s</template>
+                    <template v-else>Didn't get the email?</template>
                   </span>
                   <button
                     type="button"
@@ -237,18 +225,9 @@
                     :disabled="loading || passwordReset.remaining > 0"
                     @click="sendPasswordResetCode"
                   >
-                    Resend code
+                    Resend link
                   </button>
                 </div>
-                <button
-                  type="button"
-                  class="submit email-otp-submit"
-                  :disabled="loading || !!passwordResetCodeError"
-                  @click="verifyPasswordResetCode"
-                >
-                  <span v-if="!loading">Verify code</span>
-                  <span v-else>Verifying…</span>
-                </button>
                 <p v-if="passwordReset.notice" class="helper">{{ passwordReset.notice }}</p>
                 <p v-if="passwordReset.error" class="helper helper-error">{{ passwordReset.error }}</p>
                 <button type="button" class="btn-link modal-back-link" @click="goBackToPasswordResetEmail">
@@ -490,12 +469,6 @@ const passwordResetEmailError = computed(() => {
   return ''
 })
 
-const passwordResetCodeError = computed(() => {
-  if (!passwordReset.code) return 'Invalid verification code'
-  if (!/^\d{6}$/.test(passwordReset.code)) return 'Invalid verification code'
-  return ''
-})
-
 const passwordResetPasswordError = computed(() => {
   if (!passwordReset.newPassword || passwordReset.newPassword.length < 6) {
     return 'Password must meet minimum security requirements'
@@ -617,18 +590,18 @@ async function applyRecoveryMode() {
   try {
     const { data, error: sessionError } = await supabase.auth.getSession()
     if (sessionError) {
-      passwordReset.step = passwordReset.email ? 'code' : 'email'
+      passwordReset.step = passwordReset.email ? 'sent' : 'email'
       passwordReset.notice = ''
-      passwordReset.error = 'Recovery session expired. Please request a new code.'
+      passwordReset.error = 'Recovery session expired. Request a new password reset link.'
       return
     }
 
     const recoveryUser = data?.session?.user || null
     if (!recoveryUser?.id) {
-      passwordReset.step = passwordReset.email ? 'code' : 'email'
+      passwordReset.step = passwordReset.email ? 'sent' : 'email'
       passwordReset.notice = passwordReset.email
-        ? 'Enter the 6-digit recovery code from your email to continue.'
-        : 'Request a new recovery code to continue.'
+        ? 'Open the password reset email and use the reset link to continue.'
+        : 'Request a password reset link to continue.'
       passwordReset.error = ''
       return
     }
@@ -642,9 +615,26 @@ async function applyRecoveryMode() {
     stopPasswordResetTimer()
   } catch (error) {
     console.error('applyRecoveryMode failed', error)
-    passwordReset.step = passwordReset.email ? 'code' : 'email'
+    passwordReset.step = passwordReset.email ? 'sent' : 'email'
     passwordReset.notice = ''
-    passwordReset.error = 'Recovery session expired. Please request a new code.'
+    passwordReset.error = 'Recovery session expired. Request a new password reset link.'
+  }
+}
+
+async function fetchEmailStatus(email) {
+  const res = await fetch(
+    `${AUTH_SERVER_ORIGIN}/auth/supabase/email-status?email=${encodeURIComponent(email)}`,
+    {
+      credentials: 'include'
+    }
+  )
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data?.error || 'Failed to check email status.')
+  }
+  return {
+    exists: Boolean(data.exists),
+    confirmed: Boolean(data.confirmed)
   }
 }
 
@@ -653,35 +643,27 @@ async function sendPasswordResetCode() {
   passwordReset.error = ''
   passwordReset.notice = ''
   if (passwordResetEmailError.value) return
+
+  try {
+    const status = await fetchEmailStatus(passwordReset.email)
+    if (status.exists && !status.confirmed) {
+      passwordReset.error = 'This email is registered but not yet verified. Return to sign up and resend the verification email.'
+      return
+    }
+  } catch (err) {
+    passwordReset.error = err?.message || 'Failed to check email status.'
+    return
+  }
+
   const result = await auth.sendPasswordResetCode(passwordReset.email)
   if (!result?.success) {
-    passwordReset.error = auth.error || 'Failed to send verification code.'
+    passwordReset.error = auth.error || 'Failed to send password reset link.'
     return
   }
-  passwordReset.step = 'code'
-  passwordReset.code = ''
-  passwordReset.touchedCode = false
-  passwordReset.notice = result.notice || result.message || 'If an account exists for this email, a verification code has been sent.'
+  passwordReset.step = 'sent'
+  passwordReset.notice =
+    result.notice || result.message || 'If an account exists for this email, a password reset link has been sent.'
   startPasswordResetTimer(Number(result.resendIn || 60))
-}
-
-async function verifyPasswordResetCode() {
-  passwordReset.touchedCode = true
-  passwordReset.error = ''
-  passwordReset.notice = ''
-  if (passwordResetCodeError.value) return
-  const result = await auth.verifyPasswordResetCode({
-    email: passwordReset.email,
-    code: passwordReset.code
-  })
-  if (!result?.success) {
-    passwordReset.error = auth.error || 'Failed to verify code.'
-    return
-  }
-  passwordReset.email = result.email || passwordReset.email
-  passwordReset.step = 'password'
-  passwordReset.notice = 'Code verified. Set your new password.'
-  stopPasswordResetTimer()
 }
 
 async function confirmPasswordReset() {
@@ -773,7 +755,14 @@ async function confirmOtp() {
       return
     }
     await auth.setUserFromSupabase(data.user)
-    await auth.syncServerSessionFromSupabase()
+    const synced = await auth.syncServerSessionFromSupabase()
+    if (!synced) {
+      await auth.rollbackSupabaseAuthState(
+        'Email verified, but failed to start the app session. Please restart the auth server and try again.'
+      )
+      otp.error = auth.error || 'Failed to start the app session.'
+      return
+    }
     await syncLoginPreferencesToCloud(otp.email)
     router.push('/onboarding')
   } finally {
@@ -810,6 +799,16 @@ async function onSubmit() {
   touched.account = true
   touched.password = true
   if (hasInlineErrors.value) return
+  try {
+    const status = await fetchEmailStatus(form.account.trim())
+    if (status.exists && !status.confirmed) {
+      auth.error = 'This email is registered but not yet verified. Return to sign up and resend the verification email.'
+      return
+    }
+  } catch (err) {
+    auth.error = err?.message || 'Failed to check email status.'
+    return
+  }
   const ok = await auth.login({
     identifier: form.account,
     password: form.password,

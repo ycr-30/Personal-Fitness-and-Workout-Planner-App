@@ -133,14 +133,14 @@ defineProps({
 }
 
 .brand-copy strong {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.1;
   letter-spacing: 0.08em;
 }
 
 .brand-copy span:last-child {
   color: var(--legal-muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.2;
 }
 
@@ -169,7 +169,7 @@ defineProps({
   align-items: center;
   justify-content: center;
   min-height: 31px;
-  padding: 0 10px;
+  padding: 0 9px;
   border-radius: 999px;
   border: 1px solid var(--legal-border);
   text-decoration: none;
@@ -179,7 +179,7 @@ defineProps({
 
 .btn-primary {
   border-color: rgba(255, 90, 95, 0.14);
-  background: rgba(255, 90, 95, 0.09);
+  background: rgba(255, 90, 95, 0.07);
   color: var(--legal-coral);
   box-shadow: none;
 }

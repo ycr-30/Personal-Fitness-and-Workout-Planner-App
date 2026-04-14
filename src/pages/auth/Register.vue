@@ -175,6 +175,7 @@
           <h3>Verify your account</h3>
           <p>Enter the verification code for <strong>{{ verification.email }}</strong>.</p>
         </div>
+          <p v-if="error" class="error">{{ error }}</p>
           <div class="field">
             <label for="verify-code">Verification code</label>
             <input
@@ -422,6 +423,25 @@ watch(
   { immediate: true }
 )
 
+async function fetchEmailStatus(email) {
+  const res = await fetch(
+    `${AUTH_SERVER_ORIGIN}/auth/supabase/email-status?email=${encodeURIComponent(email)}`,
+    {
+      credentials: 'include'
+    }
+  )
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data?.error || 'Failed to check email status.')
+  }
+
+  return {
+    exists: Boolean(data.exists),
+    confirmed: Boolean(data.confirmed)
+  }
+}
+
 async function onSubmit() {
   touched.name = true
   touched.account = true
@@ -482,8 +502,37 @@ async function onSubmit() {
     height: form.height,
     weight: form.weight
   }
+
+  let emailStatus
+  try {
+    emailStatus = await fetchEmailStatus(form.account.trim())
+  } catch (err) {
+    console.error('Email status lookup failed', err)
+    auth.error = err?.message || 'Failed to check email status.'
+    return
+  }
+
+  if (emailStatus.exists && emailStatus.confirmed) {
+    const recovered = await auth.login({
+      identifier: form.account,
+      password: form.password,
+      remember: true
+    })
+    if (recovered) {
+      pendingPayload.value = null
+      const target = auth.user?.onboarding?.completed ? '/dashboard' : '/onboarding'
+      router.push(target)
+      return
+    }
+    auth.error = 'This email already has an account. Sign in with your password or reset it if needed.'
+    return
+  }
+
   pendingPayload.value = payload
-  const result = await auth.beginLocalRegistration(payload)
+  const result =
+    emailStatus.exists && !emailStatus.confirmed
+      ? await auth.beginLocalRegistration(payload, { resend: true })
+      : await auth.beginLocalRegistration(payload)
   if (!result?.ok) return
   if (result.verified) {
     pendingPayload.value = null
@@ -540,6 +589,8 @@ async function sendVerificationCode() {
 async function confirmVerification() {
   verification.touched = true
   verification.error = ''
+  verification.notice = ''
+  auth.error = null
   if (!verification.code) {
     verification.error = 'Please enter the verification code.'
     return
@@ -553,7 +604,10 @@ async function confirmVerification() {
     code: verification.code,
     profile: pendingPayload.value
   })
-  if (!ok) return
+  if (!ok) {
+    verification.error = auth.error || 'Failed to complete registration.'
+    return
+  }
   pendingPayload.value = null
   router.push('/onboarding')
 }

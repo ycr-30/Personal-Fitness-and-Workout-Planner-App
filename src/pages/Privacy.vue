@@ -257,11 +257,10 @@
       </ul>
       <p>
         Depending on the feature, your account state, and what is currently supported in the
-        product, Fitness AI Planner may offer certain in-app controls, including profile or
-        settings updates and, where available, data export or account deletion tools. If you
-        want to request access, correction, deletion, restriction, objection, export, or
-        another privacy-related action, you can use available in-app controls where available
-        or email <strong>13957075669@139.com</strong>.
+        product, you may be able to act through account settings where available, through export
+        tools where available, through account deletion tools where available, or by contacting
+        <strong>13957075669@139.com</strong>. If a particular right cannot currently be carried
+        out inside the product, it can still be requested through the published contact channel.
       </p>
       <p>
         If you contact Fitness AI Planner by email to exercise one of these rights, include

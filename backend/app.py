@@ -20,7 +20,8 @@ from agents.nutrition_agent import (
     answer_food_estimate as nutrition_food_estimate,
     answer_target_pack as nutrition_target_pack,
 )
-from agents.router import BOTH_EXPLICIT, route, scoped_message
+from agents.prompts import NUTRITION_ANALYTICS_SYSTEM_PROMPT, WORKOUT_ANALYTICS_SYSTEM_PROMPT
+from agents.router import BOTH_EXPLICIT, NUTRITION_ONLY_OVERRIDE, WORKOUT_ONLY_OVERRIDE, route, scoped_message
 from agents.workout_agent import answer as workout_answer
 
 app = FastAPI(title="KeepFit Multi-Agent API", version="0.1.0")
@@ -362,30 +363,13 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
     profile = _extract_profile(req)
     external_evidence = _extract_external_evidence(req)
     r = route(message)
-    lowered = message.strip().lower()
     explicit_dual_intent = bool(BOTH_EXPLICIT.search(message))
+    explicit_nutrition_only = bool(NUTRITION_ONLY_OVERRIDE.search(message))
+    explicit_workout_only = bool(WORKOUT_ONLY_OVERRIDE.search(message))
 
-    nutrition_only_guard = (
-        re.search(r"(?:饮食计划|食谱|餐单|一周饮食|七天饮食|只要饮食|不要训练)", message, re.I)
-        or re.search(
-            r"\b(?:meal plan|diet plan|nutrition plan|nutrition only|diet only|no workout|no training)\b",
-            lowered,
-            re.I,
-        )
-    )
-
-    workout_only_guard = (
-        re.search(r"(?:训练计划|健身计划|只要训练|不要饮食)", message, re.I)
-        or re.search(
-            r"\b(?:workout plan|training plan|workout only|training only|no diet|no nutrition)\b",
-            lowered,
-            re.I,
-        )
-    )
-
-    if nutrition_only_guard and not explicit_dual_intent:
+    if explicit_nutrition_only and not explicit_dual_intent:
         r = "nutrition"
-    elif workout_only_guard and not explicit_dual_intent:
+    elif explicit_workout_only and not explicit_dual_intent:
         r = "workout"
 
     if r == "nutrition":
@@ -453,7 +437,7 @@ def analytics_insight(req: AnalyticsInsightReq, authorization: str | None = Head
     try:
         workout_prompt = _build_workout_analytics_prompt(summary, range_days, snapshot_version, profile)
         workout_messages = [
-            {"role": "system", "content": WORKOUT_SYSTEM_PROMPT},
+            {"role": "system", "content": WORKOUT_ANALYTICS_SYSTEM_PROMPT},
             {"role": "user", "content": workout_prompt},
         ]
         workout_raw = manager.generate(workout_messages, adapter="workout")
@@ -465,7 +449,7 @@ def analytics_insight(req: AnalyticsInsightReq, authorization: str | None = Head
         if _supports_nutrition_analytics(summary):
             nutrition_prompt = _build_nutrition_analytics_prompt(summary, range_days, snapshot_version, profile)
             nutrition_messages = [
-                {"role": "system", "content": NUTRITION_SYSTEM_PROMPT},
+                {"role": "system", "content": NUTRITION_ANALYTICS_SYSTEM_PROMPT},
                 {"role": "user", "content": nutrition_prompt},
             ]
             nutrition_raw = manager.generate(nutrition_messages, adapter="nutrition")

@@ -695,7 +695,7 @@ onBeforeUnmount(() => {
 
 .nav-btn {
   min-height: 36px;
-  padding: 0 9px;
+  padding: 0 8px;
   font-size: 13px;
 }
 
@@ -719,6 +719,7 @@ onBeforeUnmount(() => {
   background: rgba(255, 90, 95, 0.075);
   border-color: rgba(255, 90, 95, 0.1);
   box-shadow: none;
+  padding-inline: 10px;
 }
 
 .hero-section {
@@ -761,7 +762,7 @@ onBeforeUnmount(() => {
 .hero-copy h1 {
   max-width: 17ch;
   font-size: clamp(24px, 2.1vw, 33px);
-  line-height: 1.01;
+  line-height: 1;
 }
 
 .hero-body,
@@ -952,11 +953,11 @@ onBeforeUnmount(() => {
 .coach-evidence-line {
   margin: 0;
   color: var(--landing-muted);
-  font-size: 9.25px;
+  font-size: 8.9px;
   line-height: 1.28;
   letter-spacing: 0.1em;
   font-weight: 600;
-  opacity: 0.62;
+  opacity: 0.56;
 }
 
 .badge-coral,
@@ -1027,7 +1028,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--landing-border);
   border-radius: 14px;
   background: #fcfdff;
-  padding: 5px 6px;
+  padding: 5px 7px;
   display: grid;
   gap: 3px;
   justify-items: center;
@@ -1157,8 +1158,8 @@ onBeforeUnmount(() => {
 }
 
 .feature-card {
-  min-height: 130px;
-  padding: 11px;
+  min-height: 128px;
+  padding: 11px 10px;
   display: grid;
   gap: 7px;
   justify-items: center;
@@ -1300,8 +1301,8 @@ onBeforeUnmount(() => {
   align-self: stretch;
   justify-self: stretch;
   height: 100%;
-  min-height: 304px;
-  padding: 16px;
+  min-height: 314px;
+  padding: 17px 16px;
   grid-template-rows: auto 1fr;
   gap: 13px;
   border-radius: 20px;
@@ -1320,7 +1321,7 @@ onBeforeUnmount(() => {
 }
 
 .chat-proof-card :deep(.chat-body) {
-  gap: 9px;
+  gap: 10px;
   align-content: center;
 }
 
@@ -1342,7 +1343,7 @@ onBeforeUnmount(() => {
 .system-proof-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 12px;
+  gap: 11px;
   max-width: 668px;
   justify-self: end;
   align-items: stretch;
@@ -1363,8 +1364,8 @@ onBeforeUnmount(() => {
 
 .analytics-proof-card.analytics-mockup,
 .nutrition-proof-card.nutrition-mockup {
-  padding: 14px;
-  gap: 12px;
+  padding: 14px 13px;
+  gap: 11px;
 }
 
 .analytics-proof-card :deep(.analytics-head strong),
@@ -1511,7 +1512,7 @@ onBeforeUnmount(() => {
 .step-card {
   position: relative;
   z-index: 1;
-  min-height: 109px;
+  min-height: 108px;
   padding: 10px 12px;
   display: grid;
   gap: 5px;
@@ -1525,12 +1526,12 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   background: rgba(75, 123, 255, 0.08);
   color: var(--landing-blue);
-  font-size: 8.5px;
+  font-size: 8px;
   font-weight: 700;
   justify-self: start;
 }
@@ -1562,7 +1563,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .footer-brand-block {
@@ -1593,10 +1594,10 @@ onBeforeUnmount(() => {
 
 .footer-description {
   margin: 0;
-  max-width: 23ch;
+  max-width: 24ch;
   color: var(--landing-muted);
   font-size: 11px;
-  line-height: 1.36;
+  line-height: 1.38;
 }
 
 .footer-note {
@@ -1613,6 +1614,7 @@ onBeforeUnmount(() => {
   color: var(--landing-muted);
   font-size: 11px;
   font-weight: 500;
+  opacity: 0.9;
 }
 
 .footer-link-action {

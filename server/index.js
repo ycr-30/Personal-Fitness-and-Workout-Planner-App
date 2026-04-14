@@ -14,6 +14,7 @@ import dotenv from 'dotenv'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 dotenv.config({ path: resolve(__dirname, '.env') })
+dotenv.config({ path: resolve(__dirname, '../.env.local') })
 
 const {
   PORT = 4000,
@@ -26,8 +27,10 @@ const {
   APPLE_KEY_ID,
   APPLE_PRIVATE_KEY,
   APPLE_REDIRECT_URI,
-  SUPABASE_URL = '',
+  SUPABASE_URL: RAW_SUPABASE_URL = '',
   SUPABASE_SERVICE_ROLE_KEY = '',
+  SUPABASE_PUBLISHABLE_KEY = '',
+  SUPABASE_ANON_KEY = '',
   RESEND_API_KEY = '',
   RESEND_FROM_EMAIL = '',
   RESEND_FROM_NAME = 'Fitness AI Planner',
@@ -53,6 +56,10 @@ const {
   RAG_SOURCE_TYPES = '',
   JWT_SECRET = 'replace-me'
 } = process.env
+
+const SUPABASE_URL = RAW_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
+const SUPABASE_PUBLIC_KEY =
+  SUPABASE_PUBLISHABLE_KEY || SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
 
 const app = express()
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID)
@@ -1281,8 +1288,9 @@ function getSessionUserFromRequest(req) {
 }
 
 async function getSupabaseAuthUser(accessToken) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('Supabase admin environment variables are missing on the server.')
+  const apiKey = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLIC_KEY
+  if (!SUPABASE_URL || !apiKey) {
+    throw new Error('Supabase auth environment variables are missing on the server.')
   }
   if (!accessToken) {
     const error = new Error('Missing Supabase access token.')
@@ -1294,7 +1302,7 @@ async function getSupabaseAuthUser(accessToken) {
     `${SUPABASE_URL}/auth/v1/user`,
     {
       headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        apikey: apiKey,
         Authorization: `Bearer ${accessToken}`
       }
     },
@@ -1380,6 +1388,36 @@ async function lookupSupabaseAuthUserIdByEmail(email) {
     return rows?.[0]?.id || ''
   } catch (error) {
     if (isMissingRelationError(error)) return ''
+    throw error
+  }
+}
+
+async function lookupSupabaseAuthUserByEmail(email) {
+  const normalizedEmail = normalizeOptionalEmail(email)
+  if (!normalizedEmail) return null
+
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `
+        SELECT
+          id::text AS id,
+          lower(email) AS email,
+          email_confirmed_at IS NOT NULL AS confirmed
+        FROM auth.users
+        WHERE lower(email) = $1
+        LIMIT 1
+      `,
+      normalizedEmail
+    )
+    const row = rows?.[0] || null
+    if (!row) return null
+    return {
+      id: String(row.id || ''),
+      email: String(row.email || normalizedEmail),
+      confirmed: Boolean(row.confirmed)
+    }
+  } catch (error) {
+    if (isMissingRelationError(error)) return null
     throw error
   }
 }
@@ -2381,6 +2419,24 @@ app.post('/auth/supabase/session', async (req, res) => {
 
 // Legacy local registration endpoints retained for older clients.
 // The current web frontend signs up with Supabase Auth email/password + OTP verification.
+app.get('/auth/supabase/email-status', async (req, res) => {
+  try {
+    const email = normalizeOptionalEmail(req.query.email)
+    if (!EMAIL_PATTERN.test(email || '')) {
+      return res.status(400).json({ error: 'Invalid email address.' })
+    }
+
+    const authUser = await lookupSupabaseAuthUserByEmail(email)
+    return res.json({
+      exists: Boolean(authUser),
+      confirmed: Boolean(authUser?.confirmed)
+    })
+  } catch (error) {
+    console.error('Supabase email status lookup failed', error)
+    return res.status(500).json({ error: 'Failed to check email status.' })
+  }
+})
+
 app.post('/auth/local/send-verification', async (req, res) => {
   try {
     const normalized = normalizeLocalRegistrationPayload(req.body || {})

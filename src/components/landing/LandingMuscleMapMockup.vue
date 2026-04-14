@@ -51,8 +51,8 @@ const SVG_SOURCES = {
 // - lats -> approximated with upper-back sweep reinforced by lower-back
 const chips = ['Rear delts', 'Upper back', 'Lats']
 const HERO_VIEWBOX = {
-  male: '866 94 448 316',
-  female: '952 106 436 306'
+  male: '884 94 420 274',
+  female: '972 106 402 268'
 }
 
 const activeSvgMarkup = computed(() => {
@@ -91,7 +91,7 @@ const summaryBody = computed(() => 'Rear delts, upper back, lats · 52 min')
 }
 
 .hero-shell {
-  min-height: 176px;
+  min-height: 168px;
 }
 
 .variant-preview .map-shell {
@@ -105,7 +105,7 @@ const summaryBody = computed(() => 'Rear delts, upper back, lats · 52 min')
 }
 
 .variant-hero .svg-stage {
-  min-height: 176px;
+  min-height: 168px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -124,10 +124,10 @@ const summaryBody = computed(() => 'Rear delts, upper back, lats · 52 min')
 }
 
 .variant-hero .svg-stage :deep(svg) {
-  width: 136%;
+  width: 141%;
   max-width: none;
   margin-left: 0;
-  margin-top: -6px;
+  margin-top: -3px;
 }
 
 .variant-preview .svg-stage :deep(svg) {
@@ -208,7 +208,7 @@ const summaryBody = computed(() => 'Rear delts, upper back, lats · 52 min')
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  opacity: 0.72;
+  opacity: 0.62;
 }
 
 .summary-card {

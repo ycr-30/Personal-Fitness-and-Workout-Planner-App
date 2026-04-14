@@ -71,9 +71,9 @@ const trends = [
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 16px 36px rgba(18, 24, 38, 0.05);
-  padding: 16px;
+  padding: 15px;
   display: grid;
-  gap: 11px;
+  gap: 10px;
 }
 
 .nutrition-head {
@@ -94,7 +94,7 @@ const trends = [
 }
 
 .nutrition-head strong {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.15;
   color: #121826;
   display: block;
@@ -117,14 +117,14 @@ const trends = [
 .meal-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
 }
 
 .meal-tab {
   border: 1px solid #e7ecf3;
   border-radius: 13px;
   background: #fcfdff;
-  padding: 8px 9px;
+  padding: 8px;
   display: grid;
   gap: 3px;
   flex: 1 1 calc(50% - 4px);
@@ -157,9 +157,9 @@ const trends = [
   border: 1px solid #e7ecf3;
   border-radius: 18px;
   background: linear-gradient(180deg, #fcfdff 0%, #f8fbff 100%);
-  padding: 12px;
+  padding: 11px;
   display: grid;
-  gap: 9px;
+  gap: 8px;
 }
 
 .meal-log-head {

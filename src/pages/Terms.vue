@@ -158,16 +158,16 @@
     <section>
       <h2>Governing law and venue</h2>
       <p>
-        Unless mandatory law in your location requires otherwise, these Terms and any dispute or
-        claim arising out of or relating to Fitness AI Planner will be governed by the laws of
-        the jurisdiction in which the operator of Fitness AI Planner is ordinarily resident or
-        established, without regard to conflict-of-law rules.
+        For this pre-launch public version of Fitness AI Planner, the final governing-law and
+        venue position has not yet been formally designated by the operator. Before broader
+        public launch, this section should be updated with the final governing law and court or
+        venue position chosen by the operator, subject to any mandatory law that applies to you.
       </p>
       <p>
-        Any dispute that cannot be resolved informally should be brought before the courts that
-        have jurisdiction over that place of residence or establishment, unless mandatory
-        consumer, employment, or data protection law gives you the right to bring claims
-        elsewhere.
+        Until that final designation is published, nothing in these Terms is intended to remove
+        or limit any rights you may have under mandatory consumer, employment, data protection,
+        or other applicable law, including any right to bring a claim in a court or forum made
+        available by that law.
       </p>
     </section>
 

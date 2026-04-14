@@ -132,6 +132,12 @@ function calculateBodyFat({ heightCm, weightKg, birthday, sex }) {
   return Number.isFinite(result) ? Number(result.toFixed(1)) : null
 }
 
+function clearCurrentAuthSnapshot(store) {
+  activeCloudOnboardingIdentity = ''
+  localStorage.removeItem(CURRENT_KEY)
+  store.user = null
+}
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null, // 已登录用户快照
@@ -217,7 +223,13 @@ export const useAuthStore = defineStore('auth', {
         const sessionUser = data?.session?.user || null
         if (!sessionUser) return null
         await this.setUserFromSupabase(sessionUser)
-        await this.syncServerSessionFromSupabase()
+        const synced = await this.syncServerSessionFromSupabase()
+        if (!synced) {
+          await this.rollbackSupabaseAuthState(
+            'Signed in with Supabase, but failed to start the app session. Please restart the auth server and try again.'
+          )
+          return null
+        }
         return sessionUser
       } catch (err) {
         console.error('hydrateFromSupabaseSession failed', err)
@@ -302,7 +314,7 @@ export const useAuthStore = defineStore('auth', {
           if (error) {
             const normalizedMessage = normalizeSupabaseAuthMessage(error.message)
             if (normalizedMessage.includes('already registered')) {
-              this.error = 'An account with this email already exists. Sign in or reset your password.'
+              this.error = 'This email already has an account. Sign in with your password or reset it if needed.'
             } else {
               this.error = error.message || 'Failed to create verification state.'
             }
@@ -378,7 +390,7 @@ export const useAuthStore = defineStore('auth', {
         const { data, error } = await supabase.auth.verifyOtp({
           email: trimmedEmail,
           token: trimmedCode,
-          type: 'signup'
+          type: 'email'
         })
         if (error) {
           const normalizedMessage = normalizeSupabaseAuthMessage(error.message)
@@ -414,7 +426,13 @@ export const useAuthStore = defineStore('auth', {
         }
 
         await this.setUserFromSupabase(sessionUser)
-        await this.syncServerSessionFromSupabase()
+        const synced = await this.syncServerSessionFromSupabase()
+        if (!synced) {
+          await this.rollbackSupabaseAuthState(
+            'Email verified, but failed to start the app session. Please restart the auth server and try again.'
+          )
+          return false
+        }
         if (profile) {
           try {
             await upsertSupabaseRegistrationProfile(sessionUser, profile)
@@ -458,11 +476,26 @@ export const useAuthStore = defineStore('auth', {
           password
         })
         if (error || !data?.user) {
-          this.error = error?.message || 'Incorrect email or password.'
+          const normalizedMessage = normalizeSupabaseAuthMessage(error?.message)
+          if (normalizedMessage.includes('email not confirmed')) {
+            this.error = 'Please verify your email before signing in.'
+          } else if (
+            normalizedMessage.includes('invalid login credentials') ||
+            normalizedMessage.includes('invalid credentials') ||
+            normalizedMessage.includes('invalid grant')
+          ) {
+            this.error = 'Incorrect email or password.'
+          } else {
+            this.error = error?.message || 'Incorrect email or password.'
+          }
           return false
         }
         await this.setUserFromSupabase(data.user)
-        await this.syncServerSessionFromSupabase()
+        const synced = await this.syncServerSessionFromSupabase()
+        if (!synced) {
+          await this.rollbackSupabaseAuthState('The email or password you entered is incorrect.')
+          return false
+        }
         if (remember) {
           localStorage.setItem(CURRENT_KEY, trimmedIdentifier.toLowerCase())
         } else {
@@ -471,7 +504,7 @@ export const useAuthStore = defineStore('auth', {
         return true
       } catch (err) {
         console.error('Supabase password login failed', err)
-        this.error = 'Failed to log in.'
+        this.error = 'The email or password you entered is incorrect.'
         return false
       } finally {
         this.loading = false
@@ -501,12 +534,12 @@ export const useAuthStore = defineStore('auth', {
         }
         return {
           success: true,
-          message: 'If an account exists for this email, a verification code has been sent.',
+          message: 'If an account exists for this email, a password reset link has been sent.',
           resendIn: 60
         }
       } catch (err) {
         console.error('sendPasswordResetCode failed', err)
-        this.error = 'Failed to send verification code.'
+        this.error = 'Failed to send password reset link.'
         return null
       } finally {
         this.loading = false
@@ -759,10 +792,29 @@ export const useAuthStore = defineStore('auth', {
           console.error('Supabase logout failed', err)
         }
       }
-      activeCloudOnboardingIdentity = ''
-      localStorage.removeItem(CURRENT_KEY)
-      this.user = null
+      clearCurrentAuthSnapshot(this)
       this.error = null
+    },
+
+    async rollbackSupabaseAuthState(message = '') {
+      if (supabase) {
+        try {
+          await supabase.auth.signOut()
+        } catch (err) {
+          console.error('Supabase rollback signOut failed', err)
+        }
+      }
+      try {
+        await fetch(`${AUTH_SERVER_ORIGIN}/logout`, {
+          method: 'POST',
+          credentials: 'include'
+        })
+      } catch (err) {
+        console.error('Backend rollback logout failed', err)
+      }
+      clearCurrentAuthSnapshot(this)
+      this.error = message || null
+      return false
     },
 
     applyOnboardingAnswers(answers) {

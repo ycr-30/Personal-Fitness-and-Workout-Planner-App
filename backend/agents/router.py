@@ -2,13 +2,16 @@ import re
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
+# Only explicit single-intent overrides that clearly exclude the other domain may
+# outrank dual-intent. Broad topical overlap alone must never override an
+# explicit dual-intent request.
 NUTRITION_ONLY_OVERRIDE = re.compile(
     r"(?:只要(?:饮食|营养|餐单|食谱)|"
     r"不要(?:训练|运动|健身)|"
     r"仅(?:饮食|营养)|"
     r"只回答(?:饮食|营养)|"
-    r"(?:给我|帮我).{0,12}(?:饮食计划|食谱|餐单|一周饮食|七天饮食)|"
-    r"\b(?:meal plan|diet plan|nutrition plan|meal prep|nutrition only|diet only|no workout|no training)\b)",
+    r"(?:只(?:谈|说|讲))(?:饮食|营养)|"
+    r"\b(?:nutrition only|diet only|no workout|no training)\b)",
     re.I,
 )
 
@@ -17,6 +20,7 @@ WORKOUT_ONLY_OVERRIDE = re.compile(
     r"不要(?:饮食|营养|餐单)|"
     r"仅(?:训练|健身)|"
     r"只回答(?:训练|健身)|"
+    r"(?:只(?:谈|说|讲))(?:训练|健身)|"
     r"\b(?:workout only|training only|exercise only|no diet|no nutrition)\b)",
     re.I,
 )
@@ -41,24 +45,6 @@ BOTH_EXPLICIT = re.compile(
     r"(?:训练.*饮食|饮食.*训练|营养.*训练|训练.*营养|"
     r"\b(?:workout.*nutrition|nutrition.*workout|training.*diet|diet.*training|"
     r"workout.*meal|meal.*workout|training.*meal|meal.*training)\b)",
-    re.I,
-)
-
-NUTRITION_EXCLUSIVE_RE = re.compile(
-    r"(?:只要(?:饮食|营养|餐单|食谱)|"
-    r"不要(?:训练|运动|健身)|"
-    r"仅(?:饮食|营养)|"
-    r"只回答(?:饮食|营养)|"
-    r"\b(?:nutrition only|diet only|no workout|no training)\b)",
-    re.I,
-)
-
-WORKOUT_EXCLUSIVE_RE = re.compile(
-    r"(?:只要(?:训练|健身|动作)|"
-    r"不要(?:饮食|营养|餐单)|"
-    r"仅(?:训练|健身)|"
-    r"只回答(?:训练|健身)|"
-    r"\b(?:workout only|training only|exercise only|no diet|no nutrition)\b)",
     re.I,
 )
 
@@ -103,10 +89,10 @@ def route(message: str) -> str:
     if not text:
         return "both"
 
-    if NUTRITION_EXCLUSIVE_RE.search(text):
+    if NUTRITION_ONLY_OVERRIDE.search(text):
         return "nutrition"
 
-    if WORKOUT_EXCLUSIVE_RE.search(text):
+    if WORKOUT_ONLY_OVERRIDE.search(text):
         return "workout"
 
     if BOTH_EXPLICIT.search(text):
@@ -114,12 +100,6 @@ def route(message: str) -> str:
 
     n = bool(NUTRITION_KW.search(text))
     w = bool(WORKOUT_KW.search(text))
-
-    if NUTRITION_ONLY_OVERRIDE.search(text) and not w:
-        return "nutrition"
-
-    if WORKOUT_ONLY_OVERRIDE.search(text) and not n:
-        return "workout"
 
     if n and not w:
         return "nutrition"

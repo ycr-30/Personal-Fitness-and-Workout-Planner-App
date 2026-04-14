@@ -27,9 +27,9 @@
   box-shadow: 0 12px 28px rgba(18, 24, 38, 0.045);
   height: 100%;
   min-height: 100%;
-  padding: 16px 15px;
+  padding: 17px 16px;
   display: grid;
-  gap: 12px;
+  gap: 13px;
 }
 
 .chat-head {
@@ -57,7 +57,7 @@
 
 .chat-body {
   display: grid;
-  gap: 9px;
+  gap: 10px;
   align-content: center;
 }
 

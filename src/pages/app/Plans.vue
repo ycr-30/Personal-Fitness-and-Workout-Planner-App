@@ -2600,8 +2600,8 @@ function normalizeNumber(value) {
 }
 
 function formatNumber(value, digits = 1) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) return '--'
+  const num = toNumber(value)
+  if (num == null) return '--'
   return num.toFixed(digits)
 }
 

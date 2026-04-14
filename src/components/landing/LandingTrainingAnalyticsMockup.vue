@@ -45,9 +45,9 @@ const metrics = [
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 16px 36px rgba(18, 24, 38, 0.05);
-  padding: 16px;
+  padding: 15px;
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .analytics-head {
@@ -88,7 +88,7 @@ const metrics = [
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
   color: #667085;
 }
@@ -102,7 +102,7 @@ const metrics = [
 .analytics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 7px;
 }
 
 .analytics-stat {
