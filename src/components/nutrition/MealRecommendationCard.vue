@@ -1,5 +1,5 @@
 <template>
-  <article class="panel ai-card">
+  <article class="panel ai-card recommendation-card">
     <div class="panel-head">
       <div>
         <h2>AI Meal Recommendation</h2>
@@ -167,6 +167,13 @@ const hasOverflow = computed(() => props.lines.length > 2)
   line-height: 1.55;
   color: var(--text-muted);
   padding: 0 2px;
+}
+
+:global(:root[data-theme='dark']) .recommendation-card .summary-block {
+  background:
+    linear-gradient(180deg, rgba(245, 158, 11, 0.09), transparent 28%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94));
+  border-color: rgba(245, 158, 11, 0.22);
 }
 
 .details-block {

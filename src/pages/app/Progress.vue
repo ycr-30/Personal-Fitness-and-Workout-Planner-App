@@ -375,9 +375,13 @@
         </div>
 
         <div class="consistency-main">
-          <div v-if="!consistencyDisplayHasData" class="consistency-empty-card">
-            <p>No workouts logged yet. Start logging to build your consistency map.</p>
-            <button class="btn small" type="button" @click="goToLogs">Log workout</button>
+          <div
+            v-if="!consistencyDisplayHasData"
+            class="consistency-empty-card"
+            :style="consistencyEmptyCardStyle"
+          >
+            <p :style="consistencyEmptyCardTextStyle">No workouts logged yet. Start logging to build your consistency map.</p>
+            <button class="btn small" type="button" :style="consistencyEmptyCardButtonStyle" @click="goToLogs">Log workout</button>
           </div>
 
           <div v-else-if="isSevenDayRange" class="consistency-strip-wrap">
@@ -971,6 +975,8 @@ const metricTooltip = ref({
   top: 0,
   point: null
 })
+const activeTheme = ref('light')
+let themeObserver = null
 const sourcePanel = ref({
   visible: false,
   title: '',
@@ -981,6 +987,39 @@ const sourcePanel = ref({
   emptyMessage: 'No source records for this selection.'
 })
 const selectedBodyFatSourceDate = ref(null)
+
+const consistencyEmptyCardStyle = computed(() => (
+  activeTheme.value === 'dark'
+    ? {
+        backgroundColor: '#0f172a',
+        backgroundImage:
+          'linear-gradient(180deg, rgba(242, 111, 111, 0.05), transparent 26%), linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94))',
+        borderColor: 'rgba(71, 85, 105, 0.64)',
+        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03), inset 0 -1px 0 rgba(255, 255, 255, 0.02)'
+      }
+    : {
+        backgroundColor: '#f8fafc',
+        backgroundImage: 'linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.92))',
+        borderColor: 'rgba(226, 232, 240, 0.96)',
+        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.82)'
+      }
+))
+
+const consistencyEmptyCardTextStyle = computed(() => (
+  activeTheme.value === 'dark'
+    ? { color: 'rgba(203, 213, 225, 0.82)' }
+    : { color: '#94a3b8' }
+))
+
+const consistencyEmptyCardButtonStyle = computed(() => (
+  activeTheme.value === 'dark'
+    ? {
+        background: 'rgba(15, 23, 42, 0.96)',
+        borderColor: 'rgba(71, 85, 105, 0.7)',
+        color: '#f8fafc'
+      }
+    : {}
+))
 
 function parseLocalDate(value) {
   if (!value) return null
@@ -3500,6 +3539,11 @@ function handleNextAction(action) {
   }
 }
 
+function syncThemeSnapshot() {
+  if (typeof document === 'undefined') return
+  activeTheme.value = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
+}
+
 watch(analyticsSummaryFingerprint, async () => {
   aiInsight.value = null
   aiMeta.value = createEmptyAiMeta()
@@ -3531,10 +3575,18 @@ onMounted(() => {
   loadPlan()
   loadCachedAiInsight()
   loadCloudAiInsight()
+  syncThemeSnapshot()
   if (typeof window !== 'undefined') {
     window.addEventListener('storage', handleStorage)
     window.addEventListener('pf_logs_updated', loadLogs)
     window.addEventListener('pf_plan_updated', loadPlan)
+    if (typeof MutationObserver !== 'undefined' && document?.documentElement) {
+      themeObserver = new MutationObserver(syncThemeSnapshot)
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme']
+      })
+    }
   }
 })
 
@@ -3544,6 +3596,8 @@ onBeforeUnmount(() => {
     window.removeEventListener('pf_logs_updated', loadLogs)
     window.removeEventListener('pf_plan_updated', loadPlan)
   }
+  themeObserver?.disconnect()
+  themeObserver = null
 })
 </script>
 

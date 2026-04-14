@@ -187,13 +187,25 @@ export function useUserProfile() {
   }
 
   async function saveProfile(nextValues) {
+    const normalized = normalizeUserProfile(nextValues, auth.user)
     saving.value = true
     error.value = ''
+    profile.value = normalized
+    syncAuthSnapshot(auth, normalized)
 
     try {
       const supabaseUser = await getSupabaseUser()
       if (!supabaseUser?.id) {
-        throw new Error('A Supabase session is required to save profile to cloud storage.')
+        syncMeta.value = {
+          connected: false,
+          source: 'local',
+          lastSyncedAt: normalized.updatedAt || null,
+          accountLabel: auth.user?.email || auth.user?.account || auth.user?.name || 'Current user'
+        }
+        return {
+          profile: normalized,
+          cloudSaved: false
+        }
       }
 
       const payload = buildUserProfilePayload(nextValues, supabaseUser.id)
@@ -214,10 +226,22 @@ export function useUserProfile() {
         lastSyncedAt: normalized.updatedAt || null,
         accountLabel: supabaseUser.email || auth.user?.email || auth.user?.name || 'Connected account'
       }
-      return normalized
+      return {
+        profile: normalized,
+        cloudSaved: true
+      }
     } catch (err) {
       error.value = formatSupabaseError(err, 'Unable to save profile.')
-      throw err
+      syncMeta.value = {
+        connected: false,
+        source: 'local',
+        lastSyncedAt: normalized.updatedAt || null,
+        accountLabel: auth.user?.email || auth.user?.account || auth.user?.name || 'Current user'
+      }
+      return {
+        profile: normalized,
+        cloudSaved: false
+      }
     } finally {
       saving.value = false
     }

@@ -5,6 +5,7 @@
       :key="item.id"
       class="meal-tab"
       :class="{ active: modelValue === item.id }"
+      :style="modelValue === item.id ? activeTabStyle : null"
       type="button"
       role="tab"
       :aria-selected="modelValue === item.id"
@@ -22,6 +23,8 @@
 </template>
 
 <script setup>
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+
 defineProps({
   items: { type: Array, required: true },
   modelValue: { type: String, required: true },
@@ -30,6 +33,47 @@ defineProps({
 })
 
 defineEmits(['update:modelValue'])
+
+const activeTheme = ref('light')
+let themeObserver = null
+
+const activeTabStyle = computed(() => (
+  activeTheme.value === 'dark'
+    ? {
+        backgroundColor: '#0f172a',
+        backgroundImage:
+          'linear-gradient(180deg, rgba(239, 68, 68, 0.12), transparent 26%), linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94))',
+        borderColor: 'rgba(248, 113, 113, 0.36)',
+        boxShadow: '0 16px 28px rgba(0, 0, 0, 0.24)'
+      }
+    : {
+        backgroundColor: '#ffffff',
+        backgroundImage: 'linear-gradient(180deg, rgba(239, 68, 68, 0.08), rgba(255, 255, 255, 0.96))',
+        borderColor: 'rgba(239, 68, 68, 0.3)',
+        boxShadow: '0 12px 24px rgba(15, 23, 42, 0.06)'
+      }
+))
+
+function syncThemeSnapshot() {
+  if (typeof document === 'undefined') return
+  activeTheme.value = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
+}
+
+onMounted(() => {
+  syncThemeSnapshot()
+  if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+    themeObserver = new MutationObserver(syncThemeSnapshot)
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme']
+    })
+  }
+})
+
+onBeforeUnmount(() => {
+  themeObserver?.disconnect()
+  themeObserver = null
+})
 </script>
 
 <style scoped>
@@ -85,4 +129,5 @@ defineEmits(['update:modelValue'])
     grid-template-columns: 1fr;
   }
 }
+
 </style>

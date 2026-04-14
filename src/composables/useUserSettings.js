@@ -159,11 +159,24 @@ export function useUserSettings() {
     const normalized = normalizeUserSettings(nextValues)
     saving.value = true
     error.value = ''
+    settings.value = normalized
+    writeCachedUserSettings(auth.user, settings.value)
+    syncAuthSnapshot(auth, settings.value)
 
     try {
       const supabaseUser = await getSupabaseUser()
       if (!supabaseUser?.id) {
-        throw new Error('A Supabase session is required to save settings to cloud storage.')
+        syncMeta.value = {
+          connected: false,
+          source: 'cache',
+          lastSyncedAt: settings.value.updated_at || null,
+          accountLabel: auth.user?.email || auth.user?.account || auth.user?.name || 'Current user'
+        }
+        emitSettingsUpdated({ settings: settings.value, cloudSaved: false })
+        return {
+          settings: settings.value,
+          cloudSaved: false
+        }
       }
 
       const payload = {
@@ -188,11 +201,18 @@ export function useUserSettings() {
         lastSyncedAt: settings.value.updated_at || null,
         accountLabel: supabaseUser.email || auth.user?.email || auth.user?.account || 'Connected account'
       }
-      emitSettingsUpdated({ settings: settings.value })
-      return settings.value
+      emitSettingsUpdated({ settings: settings.value, cloudSaved: true })
+      return {
+        settings: settings.value,
+        cloudSaved: true
+      }
     } catch (err) {
       error.value = formatSupabaseError(err, 'Unable to save settings.')
-      throw err
+      emitSettingsUpdated({ settings: settings.value, cloudSaved: false })
+      return {
+        settings: settings.value,
+        cloudSaved: false
+      }
     } finally {
       saving.value = false
     }

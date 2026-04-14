@@ -84,6 +84,7 @@ const macroItems = computed(() => [
 
 <style scoped>
 .panel {
+  --macro-ring-core: #fff;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 22px;
@@ -144,7 +145,7 @@ const macroItems = computed(() => [
   display: grid;
   place-items: center;
   background:
-    radial-gradient(circle at center, #fff 58%, transparent 59%),
+    radial-gradient(circle at center, var(--macro-ring-core) 58%, transparent 59%),
     conic-gradient(var(--color) 0 var(--value), rgba(148, 163, 184, 0.18) var(--value) 100%);
 }
 
@@ -196,5 +197,9 @@ const macroItems = computed(() => [
 .macro-copy small {
   margin: 0;
   font-size: 12px;
+}
+
+:global(:root[data-theme='dark']) .macro-card {
+  --macro-ring-core: rgba(15, 23, 42, 0.96);
 }
 </style>

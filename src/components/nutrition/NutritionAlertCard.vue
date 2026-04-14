@@ -1,5 +1,5 @@
 <template>
-  <article class="panel ai-card">
+  <article class="panel ai-card alert-card">
     <div class="panel-head">
       <div>
         <h2>Nutrition Alerts</h2>
@@ -218,6 +218,27 @@ const contextLine = computed(() => {
 
 .alert-row.danger {
   background: rgba(244, 63, 94, 0.08);
+}
+
+:global(:root[data-theme='dark']) .alert-card .summary-block {
+  background:
+    linear-gradient(180deg, rgba(239, 68, 68, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94));
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+:global(:root[data-theme='dark']) .alert-card .summary-block.warning {
+  background:
+    linear-gradient(180deg, rgba(245, 158, 11, 0.09), transparent 28%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94));
+  border-color: rgba(245, 158, 11, 0.22);
+}
+
+:global(:root[data-theme='dark']) .alert-card .summary-block.positive {
+  background:
+    linear-gradient(180deg, rgba(34, 197, 94, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94));
+  border-color: rgba(74, 222, 128, 0.2);
 }
 
 .alert-row.positive {

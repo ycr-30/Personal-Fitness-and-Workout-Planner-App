@@ -531,6 +531,8 @@ function submit() {
 }
 
 .modal {
+  --nutrition-preview-bg: linear-gradient(180deg, rgba(239, 68, 68, 0.06), rgba(255, 255, 255, 0.96));
+  --nutrition-preview-chip-bg: rgba(255, 255, 255, 0.72);
   width: min(920px, 100%);
   max-height: calc(100vh - 48px);
   overflow: hidden;
@@ -678,7 +680,7 @@ function submit() {
 .preview-card {
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(239, 68, 68, 0.06), rgba(255, 255, 255, 0.96));
+  background: var(--nutrition-preview-bg);
   padding: 16px;
   display: grid;
   gap: 14px;
@@ -704,7 +706,7 @@ function submit() {
 
 .preview-grid div {
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--nutrition-preview-chip-bg);
   border: 1px solid var(--border);
   padding: 12px;
   display: grid;
@@ -737,6 +739,13 @@ function submit() {
   background: var(--accent);
   color: #fff;
   border-color: transparent;
+}
+
+:global(:root[data-theme='dark']) .modal {
+  --nutrition-preview-bg:
+    linear-gradient(180deg, rgba(239, 68, 68, 0.08), transparent 26%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94));
+  --nutrition-preview-chip-bg: rgba(15, 23, 42, 0.72);
 }
 
 @media (max-width: 760px) {

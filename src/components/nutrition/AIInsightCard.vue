@@ -1,5 +1,5 @@
 <template>
-  <article class="panel ai-card">
+  <article class="panel ai-card insight-card">
     <div class="panel-head">
       <div>
         <h2>AI Nutrition Insight</h2>
@@ -176,6 +176,13 @@ const hasOverflow = computed(() => props.lines.length > 2)
 .details-block {
   display: grid;
   gap: 10px;
+}
+
+:global(:root[data-theme='dark']) .insight-card .summary-block {
+  background:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.09), transparent 28%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94));
+  border-color: rgba(59, 130, 246, 0.22);
 }
 
 .state {

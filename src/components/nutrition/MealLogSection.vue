@@ -16,7 +16,7 @@
       @update:model-value="$emit('change-meal', $event)"
     />
 
-    <div class="meal-content">
+    <div class="meal-content" :style="mealContentStyle">
       <header class="meal-strip">
         <div>
           <strong>{{ activeMealMeta.label }}</strong>
@@ -32,9 +32,9 @@
         </div>
       </header>
 
-      <div v-if="loading" class="state">Loading meal entries...</div>
-      <div v-else-if="error" class="state error">{{ error }}</div>
-      <div v-else-if="!activeEntries.length" class="state">
+      <div v-if="loading" class="state" :style="mealStateStyle">Loading meal entries...</div>
+      <div v-else-if="error" class="state error" :style="mealStateStyle">{{ error }}</div>
+      <div v-else-if="!activeEntries.length" class="state" :style="mealStateStyle">
         No foods logged in {{ activeMealMeta.label.toLowerCase() }} yet.
       </div>
       <div v-else class="entry-list">
@@ -55,7 +55,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import MealTabs from './MealTabs.vue'
 import FoodEntryRow from './FoodEntryRow.vue'
 import { getMealTypeMeta, mealTypeOptions } from '@/utils/mealTimeResolver'
@@ -75,10 +75,60 @@ const mealOptions = mealTypeOptions
 const activeMealMeta = computed(() => getMealTypeMeta(props.activeMeal))
 const activeEntries = computed(() => props.groupedEntries?.[props.activeMeal] || [])
 const activeTotals = computed(() => props.mealTotals?.[props.activeMeal] || {})
+const activeTheme = ref('light')
+let themeObserver = null
+
+const mealContentStyle = computed(() => (
+  activeTheme.value === 'dark'
+    ? {
+        backgroundColor: '#0f172a',
+        backgroundImage:
+          'linear-gradient(180deg, rgba(242, 111, 111, 0.04), transparent 26%), linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94))',
+        borderColor: 'color-mix(in srgb, var(--border) 84%, transparent)'
+      }
+    : {
+        backgroundColor: '#ffffff',
+        backgroundImage: 'linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.96))',
+        borderColor: 'var(--border)'
+      }
+))
+
+const mealStateStyle = computed(() => (
+  activeTheme.value === 'dark'
+    ? {
+        backgroundColor: 'color-mix(in srgb, var(--surface-muted) 92%, transparent)',
+        borderColor: 'color-mix(in srgb, var(--border) 72%, transparent)'
+      }
+    : {
+        backgroundColor: 'var(--surface-muted)',
+        borderColor: 'transparent'
+      }
+))
 
 function formatValue(value) {
   return Number(value || 0).toFixed(2)
 }
+
+function syncThemeSnapshot() {
+  if (typeof document === 'undefined') return
+  activeTheme.value = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
+}
+
+onMounted(() => {
+  syncThemeSnapshot()
+  if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+    themeObserver = new MutationObserver(syncThemeSnapshot)
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme']
+    })
+  }
+})
+
+onBeforeUnmount(() => {
+  themeObserver?.disconnect()
+  themeObserver = null
+})
 </script>
 
 <style scoped>
@@ -158,6 +208,7 @@ function formatValue(value) {
   min-height: 180px;
   border-radius: 16px;
   background: var(--surface-muted);
+  border: 1px solid transparent;
   display: grid;
   place-items: center;
   text-align: center;
@@ -185,4 +236,5 @@ function formatValue(value) {
     width: 100%;
   }
 }
+
 </style>

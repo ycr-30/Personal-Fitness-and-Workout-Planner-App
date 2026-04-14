@@ -310,6 +310,11 @@ onMounted(() => {
   gap: 16px;
 }
 
+:global(:root[data-theme='dark']) .page-warning {
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.18), rgba(15, 23, 42, 0.94));
+  border-color: rgba(248, 113, 113, 0.22);
+}
+
 @media (min-width: 1280px) {
   .nutrition-page {
     padding: 28px clamp(18px, 3vw, 36px) 44px;

@@ -4,7 +4,13 @@
       <div>
         <h1>Personal Profile</h1>
         <p>Update the identity and body metrics that shape your plan, analytics, and nutrition guidance.</p>
-        <p v-if="saved" class="save-toast">Profile updated successfully.</p>
+        <p
+          v-if="savedMessage"
+          class="save-toast"
+          :class="{ error: savedTone === 'error', neutral: savedTone === 'neutral' }"
+        >
+          {{ savedMessage }}
+        </p>
         <p v-else-if="profileError" class="save-toast error">{{ profileError }}</p>
       </div>
     </header>
@@ -179,7 +185,8 @@ const {
   loadProfile,
   saveProfile
 } = useUserProfile()
-const saved = ref(false)
+const savedMessage = ref('')
+const savedTone = ref('success')
 const isEditingPersonal = ref(false)
 const isEditingBody = ref(false)
 const personalBackup = ref(null)
@@ -331,24 +338,26 @@ function cancelPersonalEdit() {
 }
 
 async function savePersonal() {
-  try {
-    await saveProfile({
-      ...profile.value,
-      firstName: form.firstName,
-      lastName: form.lastName,
-      displayName: fullName.value,
-      avatar: form.avatar,
-      sex: form.sex,
-      birthday: form.birthday,
-      height: form.height,
-      weight: form.weight
-    })
-    isEditingPersonal.value = false
-    saved.value = true
-    setTimeout(() => {
-      saved.value = false
-    }, 2200)
-  } catch {}
+  const result = await saveProfile({
+    ...profile.value,
+    firstName: form.firstName,
+    lastName: form.lastName,
+    displayName: fullName.value,
+    avatar: form.avatar,
+    sex: form.sex,
+    birthday: form.birthday,
+    height: form.height,
+    weight: form.weight
+  })
+  isEditingPersonal.value = false
+  profileError.value = ''
+  savedTone.value = result?.cloudSaved === false ? 'neutral' : 'success'
+  savedMessage.value = result?.cloudSaved === false
+    ? 'Profile updated on this device. Sign in with Supabase to sync it to cloud storage.'
+    : 'Profile updated successfully.'
+  setTimeout(() => {
+    savedMessage.value = ''
+  }, 2200)
 }
 
 function startBodyEdit() {
@@ -372,24 +381,26 @@ function cancelBodyEdit() {
 }
 
 async function saveBody() {
-  try {
-    await saveProfile({
-      ...profile.value,
-      firstName: form.firstName,
-      lastName: form.lastName,
-      displayName: fullName.value,
-      avatar: form.avatar,
-      sex: form.sex,
-      birthday: form.birthday,
-      height: form.height,
-      weight: form.weight
-    })
-    isEditingBody.value = false
-    saved.value = true
-    setTimeout(() => {
-      saved.value = false
-    }, 2200)
-  } catch {}
+  const result = await saveProfile({
+    ...profile.value,
+    firstName: form.firstName,
+    lastName: form.lastName,
+    displayName: fullName.value,
+    avatar: form.avatar,
+    sex: form.sex,
+    birthday: form.birthday,
+    height: form.height,
+    weight: form.weight
+  })
+  isEditingBody.value = false
+  profileError.value = ''
+  savedTone.value = result?.cloudSaved === false ? 'neutral' : 'success'
+  savedMessage.value = result?.cloudSaved === false
+    ? 'Profile updated on this device. Sign in with Supabase to sync it to cloud storage.'
+    : 'Profile updated successfully.'
+  setTimeout(() => {
+    savedMessage.value = ''
+  }, 2200)
 }
 
 function setSex(value) {
@@ -457,6 +468,10 @@ onMounted(() => {
   margin-top: 8px;
   font-size: 13px;
   color: #15803d;
+}
+
+.save-toast.neutral {
+  color: var(--text-muted);
 }
 
 .save-toast.error {

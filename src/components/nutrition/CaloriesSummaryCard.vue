@@ -88,6 +88,9 @@ const ringStyle = computed(() => ({
 
 <style scoped>
 .panel {
+  --calories-ring-core: #fff;
+  --calories-highlight-bg: linear-gradient(180deg, rgba(239, 68, 68, 0.08), rgba(255, 255, 255, 0.95));
+  --calories-ring-inner-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 22px;
@@ -163,7 +166,7 @@ const ringStyle = computed(() => ({
   display: grid;
   place-items: center;
   background:
-    radial-gradient(circle at center, #fff 59%, transparent 60%),
+    radial-gradient(circle at center, var(--calories-ring-core) 59%, transparent 60%),
     conic-gradient(var(--accent) 0 var(--value), rgba(148, 163, 184, 0.18) var(--value) 100%);
 }
 
@@ -176,7 +179,7 @@ const ringStyle = computed(() => ({
   display: grid;
   place-items: center;
   text-align: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  box-shadow: var(--calories-ring-inner-shadow);
 }
 
 .ring-inner strong {
@@ -222,7 +225,7 @@ const ringStyle = computed(() => ({
 }
 
 .metric.highlight {
-  background: linear-gradient(180deg, rgba(239, 68, 68, 0.08), rgba(255, 255, 255, 0.95));
+  background: var(--calories-highlight-bg);
 }
 
 .progress-block {
@@ -254,6 +257,14 @@ const ringStyle = computed(() => ({
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #fb7185, #ef4444);
+}
+
+:global(:root[data-theme='dark']) .calories-card {
+  --calories-ring-core: rgba(15, 23, 42, 0.96);
+  --calories-highlight-bg:
+    linear-gradient(180deg, rgba(239, 68, 68, 0.1), transparent 28%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(15, 23, 42, 0.94));
+  --calories-ring-inner-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 @media (max-width: 860px) {

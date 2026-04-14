@@ -539,12 +539,16 @@ const lastSyncedLabel = computed(() => {
 
 async function persistSettings() {
   try {
-    await saveUserSettings(form)
-    statusMessage.value = 'Saved successfully.'
-    statusTone.value = 'success'
+    const result = await saveUserSettings(form)
+    if (result?.cloudSaved === false) {
+      statusMessage.value = 'Applied on this device. Sign in with Supabase to sync settings to cloud storage.'
+      statusTone.value = 'neutral'
+    } else {
+      statusMessage.value = 'Saved successfully.'
+      statusTone.value = 'success'
+    }
     queueStatusClear()
   } catch {
-    applyThemePreview(settings.value?.theme || defaultUserSettings.theme)
     statusMessage.value = error.value || 'Unable to save settings.'
     statusTone.value = 'error'
   }

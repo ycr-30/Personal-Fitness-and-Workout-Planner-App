@@ -82,7 +82,7 @@ defineEmits(['select', 'update:filterMode'])
   padding: 0 14px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 700;
