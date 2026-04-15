@@ -188,7 +188,7 @@
               <input
                 v-model.trim="form.location"
                 type="text"
-                placeholder="Gold's Gym"
+                placeholder="Enter location"
                 list="location-suggestions"
               />
               <datalist id="location-suggestions">
@@ -333,6 +333,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getUserStorageKey } from '@/lib/userStorage'
 import { useUserSettings } from '@/composables/useUserSettings'
+import { buildWorkoutLocationSuggestions, getLatestWorkoutLocation } from '@/utils/workoutLocations'
 
 const auth = useAuthStore()
 const storageKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
@@ -584,10 +585,9 @@ const emptyMessage = computed(() =>
     : 'Click "Log Workout" to add your first session.'
 )
 
-const baseLocationSuggestions = ["Gold's Gym", 'Home', 'Uni Gym']
 const locationSuggestions = computed(() => {
   const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
-  return Array.from(new Set([defaultLocation, ...baseLocationSuggestions].filter(Boolean)))
+  return buildWorkoutLocationSuggestions(workouts.value, defaultLocation)
 })
 
 const muscleGroupOptions = [
@@ -722,8 +722,9 @@ function getWorkoutDefaults() {
   const { hours, minutes } = splitDurationMinutes(
     userSettings.value?.workout_default_duration_min || 60
   )
+  const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
   return {
-    location: (userSettings.value?.workout_default_location || '').trim(),
+    location: getLatestWorkoutLocation(workouts.value, defaultLocation),
     rpe: Number(userSettings.value?.workout_default_rpe) || 6,
     durationHours: hours,
     durationMinutes: minutes

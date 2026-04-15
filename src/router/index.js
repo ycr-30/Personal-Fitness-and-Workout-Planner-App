@@ -2,23 +2,22 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getStableDeviceId, saveCloudClientState } from '@/lib/cloudClientState'
 
-// 按你当前的目录结构引入页面
-import Landing from '@/pages/Landing.vue'
-import Privacy from '@/pages/Privacy.vue'
-import Terms from '@/pages/Terms.vue'
-import Disclaimer from '@/pages/Disclaimer.vue'
-import Login from '@/pages/auth/Login.vue'
-import Register from '@/pages/auth/Register.vue'
-import Dashboard from '@/pages/app/Dashboard.vue'
-import Plans from '@/pages/app/Plans.vue'
-import Progress from '@/pages/app/Progress.vue'
-import Schedule from '@/pages/app/Schedule.vue'
-import Nutrition from '@/pages/app/Nutrition.vue'
-import Logs from '@/pages/app/Logs.vue'
-import MuscleMap from '@/pages/app/MuscleMap.vue'
-import Profile from '@/pages/app/Profile.vue'
-import Settings from '@/pages/app/Settings.vue'
-import Onboarding from '@/pages/onboarding/Survey.vue'
+const Landing = () => import('@/pages/Landing.vue')
+const Privacy = () => import('@/pages/Privacy.vue')
+const Terms = () => import('@/pages/Terms.vue')
+const Disclaimer = () => import('@/pages/Disclaimer.vue')
+const Login = () => import('@/pages/auth/Login.vue')
+const Register = () => import('@/pages/auth/Register.vue')
+const Dashboard = () => import('@/pages/app/Dashboard.vue')
+const Plans = () => import('@/pages/app/Plans.vue')
+const Progress = () => import('@/pages/app/Progress.vue')
+const Schedule = () => import('@/pages/app/Schedule.vue')
+const Nutrition = () => import('@/pages/app/Nutrition.vue')
+const Logs = () => import('@/pages/app/Logs.vue')
+const MuscleMap = () => import('@/pages/app/MuscleMap.vue')
+const Profile = () => import('@/pages/app/Profile.vue')
+const Settings = () => import('@/pages/app/Settings.vue')
+const Onboarding = () => import('@/pages/onboarding/Survey.vue')
 
 const LAST_APP_ROUTE_KEY = import.meta.env.DEV ? 'pf_last_app_route_dev' : 'pf_last_app_route'
 const ENABLE_CLOUD_LAST_ROUTE_SYNC = !import.meta.env.DEV
@@ -150,9 +149,14 @@ router.beforeEach(async (to, from, next) => {
   const isOnboardingEdit = to.name === 'onboarding' && String(to.query.edit || '') === '1'
   const isRecoveryRoute = to.name === 'login' && String(to.query.mode || '') === 'recovery'
   const isPublicInfoPage = to.meta?.publicInfoPage === true
+  const shouldHydrateAuth = Boolean(to.meta.requiresAuth || to.meta.guestOnly || auth.user)
 
   if (!auth.user) auth.init()
-  await auth.hydrateFromServer()
+  if (shouldHydrateAuth) {
+    await auth.hydrateFromServer({
+      maxAgeMs: to.meta.requiresAuth ? 60000 : 30000
+    })
+  }
 
   if (to.meta.requiresAuth && !auth.isAuthed) {
     return next({ name: 'login', query: { redirect: to.fullPath } })

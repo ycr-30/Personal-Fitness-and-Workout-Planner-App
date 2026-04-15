@@ -3,11 +3,37 @@
     <div v-if="showShell" class="app-shell">
       <AppHeader />
       <main class="app-main">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Suspense>
+            <component :is="Component" />
+            <template #fallback>
+              <div class="route-loading route-loading-shell" aria-hidden="true">
+                <div class="route-loading-card">
+                  <div class="route-loading-line route-loading-title"></div>
+                  <div class="route-loading-line"></div>
+                  <div class="route-loading-line route-loading-short"></div>
+                </div>
+              </div>
+            </template>
+          </Suspense>
+        </RouterView>
       </main>
     </div>
     <main v-else class="app-main compact">
-      <RouterView />
+      <RouterView v-slot="{ Component }">
+        <Suspense>
+          <component :is="Component" />
+          <template #fallback>
+            <div class="route-loading route-loading-compact" aria-hidden="true">
+              <div class="route-loading-card">
+                <div class="route-loading-line route-loading-title"></div>
+                <div class="route-loading-line"></div>
+                <div class="route-loading-line route-loading-short"></div>
+              </div>
+            </div>
+          </template>
+        </Suspense>
+      </RouterView>
     </main>
 
     <FloatingCoachChat v-if="showCoachChat" />
@@ -411,6 +437,58 @@ button:hover,
   display: block;
 }
 
+.route-loading {
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.route-loading-shell {
+  background: var(--app-bg);
+}
+
+.route-loading-compact {
+  background: var(--app-bg);
+}
+
+.route-loading-card {
+  width: min(100%, 920px);
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.route-loading-line {
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--surface-muted) 0%, var(--surface-soft) 50%, var(--surface-muted) 100%);
+  background-size: 200% 100%;
+  animation: route-loading-shimmer 1.2s linear infinite;
+}
+
+.route-loading-line + .route-loading-line {
+  margin-top: 14px;
+}
+
+.route-loading-title {
+  height: 28px;
+  width: min(320px, 55%);
+}
+
+.route-loading-short {
+  width: min(220px, 38%);
+}
+
+@keyframes route-loading-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
 @media (min-width: 1280px) {
   .app-shell {
     grid-template-columns: 232px minmax(0, 1fr);
@@ -421,6 +499,16 @@ button:hover,
   .app-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
+  }
+
+  .route-loading {
+    min-height: calc(100vh - 120px);
+    padding: 18px;
+  }
+
+  .route-loading-card {
+    padding: 22px;
+    border-radius: 22px;
   }
 }
 </style>

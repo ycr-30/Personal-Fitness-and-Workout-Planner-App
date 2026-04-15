@@ -497,7 +497,7 @@
               <input
                 v-model.trim="logForm.location"
                 type="text"
-                placeholder="Gold's Gym"
+                placeholder="Enter location"
                 list="log-location-suggestions"
               />
               <datalist id="log-location-suggestions">
@@ -645,6 +645,7 @@ import { buildFallbackNutritionTargetRecommendation } from '@/lib/nutritionGoalS
 import { getUserStorageKey } from '@/lib/userStorage'
 import { buildNutritionSummary } from '@/utils/nutritionCalculations'
 import { buildPlanGoalLink } from '@/utils/nutritionGoalMapping'
+import { buildWorkoutLocationSuggestions, getLatestWorkoutLocation } from '@/utils/workoutLocations'
 
 const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
 const AGENT_STAT_AGENT_ORDER = ['chat', 'analytics', 'nutrition']
@@ -709,7 +710,7 @@ function closeLogModal() {
 
 function resetLogForm() {
   logForm.date = ''
-  logForm.location = ''
+  logForm.location = getLatestWorkoutLocation(logs.value)
   logForm.exercises = []
 }
 
@@ -941,7 +942,7 @@ function createEmptyAgentStats() {
 
 const agentStats = ref(createEmptyAgentStats())
 
-const locationSuggestions = ["Gold's Gym", 'Home', 'Uni Gym']
+const locationSuggestions = computed(() => buildWorkoutLocationSuggestions(logs.value))
 const muscleGroupOptions = [
   { value: 'Chest', label: 'Chest 胸' },
   { value: 'Back', label: 'Back 背' },

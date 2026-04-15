@@ -8,6 +8,8 @@ const CURRENT_KEY = 'pf_current_user' // 当前登录用户的账号键
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/ // 邮箱格式校验
 const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000' // 鉴权服务地址
 let activeCloudOnboardingIdentity = ''
+let serverHydratePromise = null
+let lastServerHydrateAt = 0
 
 function normalizeSupabaseAuthMessage(value) {
   return String(value || '').trim().toLowerCase()
@@ -168,8 +170,15 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async hydrateFromServer() {
-      try {
+    async hydrateFromServer({ force = false, maxAgeMs = 30000 } = {}) {
+      const now = Date.now()
+      if (!force && lastServerHydrateAt && now - lastServerHydrateAt < maxAgeMs) {
+        return this.user
+      }
+      if (serverHydratePromise) return serverHydratePromise
+
+      serverHydratePromise = (async () => {
+        try {
         const res = await fetch(`${AUTH_SERVER_ORIGIN}/me`, {
           credentials: 'include'
         })
@@ -181,7 +190,8 @@ export const useAuthStore = defineStore('auth', {
           } else if (this.user?.provider) {
             this.user = null
           }
-          return
+          lastServerHydrateAt = Date.now()
+          return this.user
         }
         const data = await res.json()
         if (data?.user) {
@@ -207,9 +217,18 @@ export const useAuthStore = defineStore('auth', {
           cacheUserRecord(nextUser)
           this.user = nextUser
         }
+        lastServerHydrateAt = Date.now()
+        return this.user
       } catch (err) {
         console.error('hydrateFromServer failed', err)
+        lastServerHydrateAt = Date.now()
+        return this.user
+      } finally {
+        serverHydratePromise = null
       }
+      })()
+
+      return serverHydratePromise
     },
 
     async hydrateFromSupabaseSession() {
@@ -717,6 +736,7 @@ export const useAuthStore = defineStore('auth', {
           const payload = await response.json().catch(() => ({}))
           throw new Error(payload?.error || 'Failed to sync backend session.')
         }
+        lastServerHydrateAt = Date.now()
         return true
       } catch (err) {
         console.error('syncServerSessionFromSupabase failed', err)
@@ -793,6 +813,7 @@ export const useAuthStore = defineStore('auth', {
         }
       }
       clearCurrentAuthSnapshot(this)
+      lastServerHydrateAt = 0
       this.error = null
     },
 
@@ -813,6 +834,7 @@ export const useAuthStore = defineStore('auth', {
         console.error('Backend rollback logout failed', err)
       }
       clearCurrentAuthSnapshot(this)
+      lastServerHydrateAt = 0
       this.error = message || null
       return false
     },

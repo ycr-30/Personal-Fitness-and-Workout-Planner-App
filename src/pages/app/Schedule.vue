@@ -146,7 +146,7 @@
               <input
                 v-model.trim="createForm.location"
                 type="text"
-                placeholder="Gold's Gym"
+                placeholder="Enter location"
                 list="schedule-location-suggestions"
               />
               <datalist id="schedule-location-suggestions">
@@ -307,6 +307,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { getUserStorageKey } from '@/lib/userStorage'
 import { useUserSettings } from '@/composables/useUserSettings'
+import { buildWorkoutLocationSuggestions, getLatestWorkoutLocation } from '@/utils/workoutLocations'
 
 const auth = useAuthStore()
 const logsKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
@@ -331,10 +332,9 @@ const createForm = reactive({
 })
 
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const baseLocationSuggestions = ["Gold's Gym", 'Home', 'Uni Gym']
 const locationSuggestions = computed(() => {
   const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
-  return Array.from(new Set([defaultLocation, ...baseLocationSuggestions].filter(Boolean)))
+  return buildWorkoutLocationSuggestions(logs.value, defaultLocation)
 })
 const muscleGroupOptions = [
   { value: 'Chest', label: 'Chest' },
@@ -748,8 +748,9 @@ function getWorkoutDefaults() {
   const { hours, minutes } = splitDurationMinutes(
     userSettings.value?.workout_default_duration_min || 60
   )
+  const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
   return {
-    location: (userSettings.value?.workout_default_location || '').trim(),
+    location: getLatestWorkoutLocation(logs.value, defaultLocation),
     rpe: Number(userSettings.value?.workout_default_rpe) || 6,
     durationHours: hours,
     durationMinutes: minutes
