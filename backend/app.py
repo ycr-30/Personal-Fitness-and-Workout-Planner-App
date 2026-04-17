@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -21,11 +22,12 @@ from agents.nutrition_agent import (
     answer_target_pack as nutrition_target_pack,
 )
 from agents.prompts import NUTRITION_ANALYTICS_SYSTEM_PROMPT, WORKOUT_ANALYTICS_SYSTEM_PROMPT
-from agents.router import BOTH_EXPLICIT, NUTRITION_ONLY_OVERRIDE, WORKOUT_ONLY_OVERRIDE, route, scoped_message
+from agents.router import is_explicit_dual_intent, is_nutrition_only_request, is_workout_only_request, route, scoped_message
 from agents.workout_agent import answer as workout_answer
 
 app = FastAPI(title="KeepFit Multi-Agent API", version="0.1.0")
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+logger = logging.getLogger("keepfit.chat")
 
 
 class ChatReq(BaseModel):
@@ -77,7 +79,10 @@ class AnalyticsInsightReq(BaseModel):
 
 
 def _parse_cors_origins() -> list[str]:
-    raw = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:4000")
+    raw = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:4000,https://keepfit.it.com,https://www.keepfit.it.com",
+    )
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
@@ -135,6 +140,10 @@ def _extract_external_evidence(req: ChatReq) -> list[dict[str, Any]]:
 
 def _contains_cjk(text: str) -> bool:
     return bool(CJK_RE.search(text or ""))
+
+
+def _detected_language(text: str) -> str:
+    return "zh" if _contains_cjk(text) else "en"
 
 
 ANALYTICS_DIRTY_RE = re.compile(
@@ -363,18 +372,18 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
     profile = _extract_profile(req)
     external_evidence = _extract_external_evidence(req)
     r = route(message)
-    explicit_dual_intent = bool(BOTH_EXPLICIT.search(message))
-    explicit_nutrition_only = bool(NUTRITION_ONLY_OVERRIDE.search(message))
-    explicit_workout_only = bool(WORKOUT_ONLY_OVERRIDE.search(message))
+    detected_language = _detected_language(message)
 
-    if explicit_nutrition_only and not explicit_dual_intent:
-        r = "nutrition"
-    elif explicit_workout_only and not explicit_dual_intent:
-        r = "workout"
+    if not is_explicit_dual_intent(message):
+        if is_nutrition_only_request(message):
+            r = "nutrition"
+        elif is_workout_only_request(message):
+            r = "workout"
 
     if r == "nutrition":
+        logger.info("chat_request route=%s language=%s agents=%s", r, detected_language, 1)
         out, ev = nutrition_answer(
-            message,
+            scoped_message(message, "nutrition"),
             user_profile=profile,
             use_rag=req.use_rag,
             external_evidence=external_evidence,
@@ -384,8 +393,9 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
         return response
 
     if r == "workout":
+        logger.info("chat_request route=%s language=%s agents=%s", r, detected_language, 1)
         out, ev = workout_answer(
-            message,
+            scoped_message(message, "workout"),
             user_profile=profile,
             use_rag=req.use_rag,
             external_evidence=external_evidence,
@@ -394,7 +404,8 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
         response["content"] = out
         return response
 
-    is_cjk = _contains_cjk(message)
+    logger.info("chat_request route=%s language=%s agents=%s", r, detected_language, 2)
+    is_cjk = detected_language == "zh"
     out_w, ev_w = workout_answer(
         scoped_message(message, "workout"),
         user_profile=profile,

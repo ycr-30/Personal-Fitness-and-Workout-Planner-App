@@ -1,4 +1,4 @@
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
+import { buildAuthServerUrl } from './authServerOrigin'
 
 function normalizeAgentType(value) {
   const text = String(value || '').trim().toLowerCase()
@@ -27,7 +27,7 @@ export async function recordAiAgentRun({
   if (!normalizedAgentType) return
 
   try {
-    const response = await fetch(`${AUTH_SERVER_ORIGIN}/api/ai/agent-runs`, {
+    const response = await fetch(buildAuthServerUrl('/api/ai/agent-runs'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

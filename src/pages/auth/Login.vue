@@ -321,6 +321,7 @@
 import { reactive, computed, watch, ref, onBeforeUnmount } from 'vue' // 引入响应式工具
 import { useRouter, useRoute } from 'vue-router' // 引入路由实例
 import { useAuthStore } from '@/stores/auth' // 引入鉴权仓库
+import { AUTH_SERVER_CONFIG_ERROR, AUTH_SERVER_ORIGIN, buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { supabase } from '@/lib/supabaseClient'
 import { getStableDeviceId, saveCloudClientState } from '@/lib/cloudClientState'
 
@@ -396,7 +397,6 @@ const displayName = computed(() => auth.user?.name || 'Athlete') // 欢迎语显
 
 // 社交登录跳转
 const socialError = ref('')
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000' // 鉴权服务地址
 const redirectPath = computed(() => {
   const raw = route.query.redirect
   if (typeof raw !== 'string') return ''
@@ -407,11 +407,11 @@ const redirectPath = computed(() => {
 async function startGoogle() {
   socialError.value = ''
   if (!AUTH_SERVER_ORIGIN) {
-    socialError.value = 'Auth server is not configured. Please set VITE_AUTH_SERVER_ORIGIN.'
+    socialError.value = AUTH_SERVER_CONFIG_ERROR
     return
   }
   try {
-    const healthUrl = new URL('/health', AUTH_SERVER_ORIGIN)
+    const healthUrl = buildAuthServerUrl('/health')
     const healthRes = await fetch(healthUrl, { credentials: 'include' })
     if (!healthRes.ok) {
       socialError.value = 'Auth server is offline. Start it with: cd server && npm run dev'
@@ -421,7 +421,7 @@ async function startGoogle() {
     socialError.value = 'Auth server is offline. Start it with: cd server && npm run dev'
     return
   }
-  const authUrl = new URL('/auth/google', AUTH_SERVER_ORIGIN)
+  const authUrl = new URL(buildAuthServerUrl('/auth/google'))
   if (redirectPath.value) authUrl.searchParams.set('redirect', redirectPath.value)
   window.location.href = authUrl.toString()
 }
@@ -623,7 +623,7 @@ async function applyRecoveryMode() {
 
 async function fetchEmailStatus(email) {
   const res = await fetch(
-    `${AUTH_SERVER_ORIGIN}/auth/supabase/email-status?email=${encodeURIComponent(email)}`,
+    `${buildAuthServerUrl('/auth/supabase/email-status')}?email=${encodeURIComponent(email)}`,
     {
       credentials: 'include'
     }

@@ -38,7 +38,7 @@
               <p v-if="touched.account && inlineErrors.account" class="helper helper-error">
                 {{ inlineErrors.account }}
               </p>
-              <p v-if="isSocial" class="helper">Auto-filled for your Google/Apple account.</p>
+              <p v-if="isSocial" class="helper">Auto-filled for your Google account.</p>
             </div>
 
             <div class="field">
@@ -55,7 +55,7 @@
               <p v-if="!isSocial && touched.password && inlineErrors.password" class="helper helper-error">
                 {{ inlineErrors.password }}
               </p>
-              <p v-if="isSocial" class="helper">Password not required for Google/Apple sign-in.</p>
+              <p v-if="isSocial" class="helper">Password not required for Google sign-in.</p>
             </div>
 
             <div class="field">
@@ -237,11 +237,11 @@
 import { reactive, computed, ref, onBeforeUnmount, onMounted, watch } from 'vue' // 引入响应式工具
 import { useRouter, useRoute } from 'vue-router' // 引入路由
 import { useAuthStore } from '@/stores/auth' // 引入鉴权仓库
+import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 
 const router = useRouter() // 获取路由
 const route = useRoute()
 const auth = useAuthStore() // 获取鉴权仓库
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000' // 鉴权服务地址
 auth.error = null // 清空错误
 
 // 注册表单数据
@@ -282,7 +282,7 @@ let verifyTimer = null
 
 const emailPattern = /^\S+@\S+\.\S+$/ // 邮箱模式
 const usernamePattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/ // 用户名规则
-const isSocial = computed(() => ['google', 'apple'].includes((route.query.prefill || '').toString()))
+const isSocial = computed(() => (route.query.prefill || '').toString() === 'google')
 
 function generateUsernameFromEmail(val) {
   if (!val) return ''
@@ -394,7 +394,7 @@ onMounted(async () => {
   if (route.query.email) form.email = route.query.email
   if (!form.account && form.email) form.account = generateUsernameFromEmail(form.email)
   try {
-    const res = await fetch(`${AUTH_SERVER_ORIGIN}/me`, {
+    const res = await fetch(buildAuthServerUrl('/me'), {
       credentials: 'include'
     })
     if (!res.ok) return
@@ -425,7 +425,7 @@ watch(
 
 async function fetchEmailStatus(email) {
   const res = await fetch(
-    `${AUTH_SERVER_ORIGIN}/auth/supabase/email-status?email=${encodeURIComponent(email)}`,
+    buildAuthServerUrl(`/auth/supabase/email-status?email=${encodeURIComponent(email)}`),
     {
       credentials: 'include'
     }
@@ -460,7 +460,7 @@ async function onSubmit() {
 
   if (isSocial.value) {
     try {
-      const res = await fetch(`${AUTH_SERVER_ORIGIN}/profile`, {
+      const res = await fetch(buildAuthServerUrl('/profile'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

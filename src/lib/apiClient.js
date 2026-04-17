@@ -1,9 +1,7 @@
 import { supabase } from './supabaseClient'
+import { AUTH_SERVER_ORIGIN } from './authServerOrigin'
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  import.meta.env.VITE_AUTH_SERVER_ORIGIN ||
-  'http://localhost:4000'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || AUTH_SERVER_ORIGIN
 
 const SUPABASE_TABLES = {
   muscles: ['muscles', 'Muscle', 'muscle', 'muscle_groups'],
@@ -37,6 +35,12 @@ function getStoredToken() {
 }
 
 function buildUrl(path, params) {
+  if (!API_BASE_URL) {
+    throw createError(
+      'API base URL is not configured for this deployment. Please set VITE_AUTH_SERVER_ORIGIN.',
+      'API_BASE_URL_MISSING'
+    )
+  }
   const url = new URL(path, API_BASE_URL)
   if (params && typeof params === 'object') {
     Object.entries(params).forEach(([key, value]) => {

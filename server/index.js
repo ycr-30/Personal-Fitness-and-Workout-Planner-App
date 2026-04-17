@@ -3,7 +3,6 @@ import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import { OAuth2Client } from 'google-auth-library'
 import jwt from 'jsonwebtoken'
-import appleSignin from 'apple-signin-auth'
 import { PrismaClient } from '@prisma/client'
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
@@ -22,11 +21,6 @@ const {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
   GOOGLE_REDIRECT_URI,
-  APPLE_CLIENT_ID,
-  APPLE_TEAM_ID,
-  APPLE_KEY_ID,
-  APPLE_PRIVATE_KEY,
-  APPLE_REDIRECT_URI,
   SUPABASE_URL: RAW_SUPABASE_URL = '',
   SUPABASE_SERVICE_ROLE_KEY = '',
   SUPABASE_PUBLISHABLE_KEY = '',
@@ -64,7 +58,14 @@ const SUPABASE_PUBLIC_KEY =
 const app = express()
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID)
 const secureCookie = process.env.NODE_ENV === 'production'
-console.info('[config] AI chat endpoint configured:', Boolean(AI_CHAT_API_URL), 'format:', AI_CHAT_API_FORMAT || 'custom')
+console.info(
+  '[config] AI chat endpoint configured:',
+  Boolean(resolveChatApiUrl()),
+  'format:',
+  AI_CHAT_API_FORMAT || 'custom',
+  'endpoint:',
+  resolveChatApiUrl() || '(unset)'
+)
 const MAX_CHAT_MESSAGE_LENGTH = 2000
 const MAX_CHAT_HISTORY_ITEMS = 200
 const MAX_MODEL_HISTORY_ITEMS = 12
@@ -155,6 +156,17 @@ const PRODUCT_HELP_DOCS = [
       'Typical release flow: verify locally (frontend + backend), push to GitHub, set production env vars (database and AI endpoints), run migrations on production database, then deploy frontend and backend.'
   }
 ]
+const CHAT_CJK_RE = /[\u4e00-\u9fff]/
+const NUTRITION_ONLY_OVERRIDE_RE =
+  /(?:只要(?:饮食|营养|餐单|食谱)|不要(?:训练|运动|健身)|仅(?:饮食|营养)|只回答(?:饮食|营养)|(?:只(?:谈|说|讲))(?:饮食|营养)|\b(?:nutrition only|diet only|no workout|no training)\b)/i
+const WORKOUT_ONLY_OVERRIDE_RE =
+  /(?:只要(?:训练|健身|动作)|不要(?:饮食|营养|餐单)|仅(?:训练|健身)|只回答(?:训练|健身)|(?:只(?:谈|说|讲))(?:训练|健身)|\b(?:workout only|training only|exercise only|no diet|no nutrition)\b)/i
+const NUTRITION_INTENT_RE =
+  /\b(?:calories?|kcal|protein|macro|diet|dietary|nutrition|meal(?:s)?|meal plan|diet plan|weekly meal plan|7[- ]day meal plan|seven day meal plan|meal prep|food|recipe|breakfast|lunch|dinner|snack|hydration|water)\b|(?:饮食|营养|热量|卡路里|蛋白|脂肪|碳水|饮食计划|食谱|餐单|菜谱|早餐|午餐|晚餐|加餐|零食|吃什么|食物|补水|喝水|一周饮食|七天饮食|一周餐单|七天餐单|一周食谱|七天食谱|饮食安排|营养安排)/i
+const WORKOUT_INTENT_RE =
+  /\b(?:workout|training|exercise|sets?|reps?|bench|squat|deadlift|program|training plan|workout plan|strength|hypertrophy|1rm|gym|cardio|mobility|split)\b|(?:训练|健身|动作|组数|次数|卧推|深蹲|硬拉|力量|肌肥大|训练计划|健身计划|训练安排|动作安排|练胸|练背|练腿|有氧|活动度|分化训练)/i
+const BOTH_EXPLICIT_RE =
+  /(?:训练.*饮食|饮食.*训练|营养.*训练|训练.*营养|\b(?:workout.*nutrition|nutrition.*workout|training.*diet|diet.*training|workout.*meal|meal.*workout|training.*meal|meal.*training)\b)/i
 const ANALYTICS_DIRTY_TEXT_RE = /\b(?:WORKOUT ADVICE|NUTRITION ADVICE|Draft response|Key conclusions?|Risks?\s*\/\s*bottlenecks?|Next\s*7[- ]day action plan|Sources?)\b/i
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/
 const USERNAME_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/
@@ -1615,11 +1627,51 @@ function formatRagSources(ragChunks) {
   return lines
 }
 
-function appendSourcesBlock(content, ragChunks) {
+function containsCjk(value) {
+  return CHAT_CJK_RE.test(String(value || ''))
+}
+
+function detectRequestLanguage(value) {
+  return containsCjk(value) ? 'zh' : 'en'
+}
+
+function detectChatIntent(value) {
+  const text = String(value || '').trim()
+  if (!text) return 'both'
+  if (NUTRITION_ONLY_OVERRIDE_RE.test(text)) return 'nutrition'
+  if (WORKOUT_ONLY_OVERRIDE_RE.test(text)) return 'workout'
+  if (BOTH_EXPLICIT_RE.test(text)) return 'both'
+
+  const hasNutrition = NUTRITION_INTENT_RE.test(text)
+  const hasWorkout = WORKOUT_INTENT_RE.test(text)
+  if (hasNutrition && !hasWorkout) return 'nutrition'
+  if (hasWorkout && !hasNutrition) return 'workout'
+  if (hasNutrition && hasWorkout) return 'both'
+  return 'both'
+}
+
+function resolveChatApiUrl(rawValue = AI_CHAT_API_URL) {
+  const endpoint = String(rawValue || '').trim()
+  if (!endpoint) return ''
+  try {
+    const url = new URL(endpoint)
+    if (!/\/chat\/?$/i.test(url.pathname)) {
+      url.pathname = `${url.pathname.replace(/\/$/, '')}/chat`
+    }
+    return url.toString()
+  } catch {
+    if (/\/chat\/?$/i.test(endpoint)) return endpoint
+    return `${endpoint.replace(/\/$/, '')}/chat`
+  }
+}
+
+function appendSourcesBlock(content, ragChunks, options = {}) {
   const body = normalizeMessageText(content)
   const sources = formatRagSources(ragChunks)
   if (!sources.length) return body
-  return `${body}\n\nSources:\n${sources.join('\n')}`
+  const language = options.language || detectRequestLanguage(body)
+  const sourcesLabel = language === 'zh' ? '来源' : 'Sources'
+  return `${body}\n\n${sourcesLabel}:\n${sources.join('\n')}`
 }
 
 function buildRagContextText(ragChunks) {
@@ -1647,37 +1699,95 @@ function buildUserProfileText(user) {
   return `User profile: ${profileBits.join(', ')}`
 }
 
+function buildTemporaryUnavailableMessage({ language, intent, ragAvailable }) {
+  const scopedIntent = intent === 'nutrition' ? 'nutrition' : intent === 'workout' ? 'workout' : 'both'
+  if (language === 'zh') {
+    if (scopedIntent === 'nutrition') {
+      return ragAvailable
+        ? '饮食教练暂时不可用。我已经检索到相关资料，但当前无法稳定生成正式回答。请稍后再试；你也可以补充目标、时间范围、忌口和预算，我恢复后会按饮食部分整理。'
+        : '饮食教练暂时不可用，请稍后再试。你也可以补充目标、时间范围、忌口和预算，我恢复后会按饮食部分整理。'
+    }
+    if (scopedIntent === 'workout') {
+      return ragAvailable
+        ? '训练教练暂时不可用。我已经检索到相关资料，但当前无法稳定生成正式回答。请稍后再试；你也可以补充训练目标、每周频率、器械条件和伤病限制，我恢复后会按训练部分整理。'
+        : '训练教练暂时不可用，请稍后再试。你也可以补充训练目标、每周频率、器械条件和伤病限制，我恢复后会按训练部分整理。'
+    }
+    return ragAvailable
+      ? '智能教练暂时不可用。我已经检索到相关资料，但当前无法稳定生成正式回答。请稍后再试；你也可以分别说明训练目标和饮食目标，我恢复后会分开整理。'
+      : '智能教练暂时不可用，请稍后再试。你也可以分别说明训练目标和饮食目标，我恢复后会分开整理。'
+  }
+
+  if (scopedIntent === 'nutrition') {
+    return ragAvailable
+      ? 'The nutrition coach is temporarily unavailable. I found related reference material, but I cannot turn it into a stable final answer right now. Please try again shortly, or add your goal, time frame, dietary preferences, and restrictions so I can build the meal plan when the service recovers.'
+      : 'The nutrition coach is temporarily unavailable right now. Please try again shortly, or add your goal, time frame, dietary preferences, and restrictions so I can build the meal plan when the service recovers.'
+  }
+  if (scopedIntent === 'workout') {
+    return ragAvailable
+      ? 'The workout coach is temporarily unavailable. I found related reference material, but I cannot turn it into a stable final answer right now. Please try again shortly, or add your goal, weekly training frequency, equipment, and injury limits so I can build the program when the service recovers.'
+      : 'The workout coach is temporarily unavailable right now. Please try again shortly, or add your goal, weekly training frequency, equipment, and injury limits so I can build the program when the service recovers.'
+  }
+  return ragAvailable
+    ? 'The coaching service is temporarily unavailable. I found related reference material, but I cannot turn it into a stable final answer right now. Please try again shortly, or separate your workout goal and nutrition goal in the next message so I can structure both sections when the service recovers.'
+    : 'The coaching service is temporarily unavailable right now. Please try again shortly, or separate your workout goal and nutrition goal in the next message so I can structure both sections when the service recovers.'
+}
+
 function buildFallbackAssistantReply({ userMessage, user, ragChunks }) {
-  const name = user?.name || 'there'
+  const language = detectRequestLanguage(userMessage)
+  const intent = detectChatIntent(userMessage)
   const helpChunks = (ragChunks || []).filter((chunk) => chunk.sourceType === 'product_help')
+
+  if (language === 'zh') {
+    return buildTemporaryUnavailableMessage({
+      language,
+      intent,
+      ragAvailable: ragChunks.length > 0
+    })
+  }
+
+  const name = user?.name || 'there'
   if (helpChunks.length) {
     const helpBody = helpChunks
       .map((chunk, index) => `${index + 1}. ${chunk.chunkText}`)
       .join('\n\n')
     return appendSourcesBlock(
       `Hi ${name}. I found a product usage answer for your question.\n\n${helpBody}\n\nIf this still does not solve the issue, share your exact error message and I will guide you step by step.`,
-      ragChunks
+      ragChunks,
+      { language }
     )
   }
 
   if (!ragChunks.length) {
-    const safeSnippet = userMessage.slice(0, 140)
-    return `Hi ${name}. I saved your message: "${safeSnippet}". The model endpoint is not connected yet, and I also could not run semantic retrieval. Ask a specific training, nutrition, recovery, or app-usage question and I will provide a structured troubleshooting or coaching answer.`
+    return buildTemporaryUnavailableMessage({
+      language,
+      intent,
+      ragAvailable: false
+    })
   }
 
   const topFindings = ragChunks.slice(0, 3).map((chunk, index) => {
     const snippet = chunk.chunkText.replace(/\s+/g, ' ').slice(0, 180)
     return `${index + 1}. ${snippet}`
   })
+  const intro =
+    intent === 'nutrition'
+      ? `Hi ${name}. I found nutrition-related reference material while the live coach is temporarily unavailable.`
+      : intent === 'workout'
+      ? `Hi ${name}. I found training-related reference material while the live coach is temporarily unavailable.`
+      : `Hi ${name}. I found related training and nutrition reference material while the live coach is temporarily unavailable.`
   const base = [
-    `Hi ${name}. I found relevant knowledge for your question and used retrieval fallback (model endpoint not connected).`,
+    intro,
     '',
     'Key findings:',
     ...topFindings,
     '',
-    'If you share your goal, training days per week, and equipment, I can convert this into a structured workout + nutrition plan.'
+    intent === 'nutrition'
+      ? 'If you share your goal, time frame, dietary preferences, and restrictions, I can turn this into a structured meal plan when the service recovers.'
+      : intent === 'workout'
+      ? 'If you share your goal, training days per week, equipment, and injury limits, I can turn this into a structured workout plan when the service recovers.'
+      : 'If you share your goal, training days per week, equipment, dietary preferences, and restrictions, I can turn this into a structured workout and nutrition plan when the service recovers.'
   ].join('\n')
-  return appendSourcesBlock(base, ragChunks)
+  return appendSourcesBlock(base, ragChunks, { language })
 }
 
 function resolveEmbeddingEndpoint() {
@@ -1893,7 +2003,7 @@ function buildModelMessages({ user, userMessage, history, ragContextText }) {
 }
 
 async function requestChatCompletion({ messages, user, ragChunks, ragContextText }) {
-  const endpoint = String(AI_CHAT_API_URL || '').trim()
+  const endpoint = resolveChatApiUrl()
   if (!endpoint) return ''
 
   const headers = { 'Content-Type': 'application/json' }
@@ -1943,15 +2053,11 @@ async function requestChatCompletion({ messages, user, ragChunks, ragContextText
 }
 
 function buildAnalyticsApiUrl() {
-  const endpoint = String(AI_CHAT_API_URL || '').trim()
+  const endpoint = resolveChatApiUrl()
   if (!endpoint) return ''
   try {
     const url = new URL(endpoint)
-    if (/\/chat\/?$/i.test(url.pathname)) {
-      url.pathname = url.pathname.replace(/\/chat\/?$/i, '/analytics/insight')
-    } else {
-      url.pathname = `${url.pathname.replace(/\/$/, '')}/analytics/insight`
-    }
+    url.pathname = url.pathname.replace(/\/chat\/?$/i, '/analytics/insight')
     url.search = ''
     return url.toString()
   } catch {
@@ -2013,7 +2119,7 @@ async function generateAssistantReply({ userMessage, user, history, userId }) {
     user,
     ragChunks
   })
-  const endpoint = String(AI_CHAT_API_URL || '').trim()
+  const endpoint = resolveChatApiUrl()
   if (!endpoint) {
     return {
       content: fallbackContent,
@@ -2937,66 +3043,6 @@ app.get('/auth/google/callback', async (req, res) => {
       stack: err?.stack
     })
     res.status(500).send('Google auth failed')
-  }
-})
-
-// Apple OAuth2 code exchange (Sign in with Apple)
-app.post('/auth/apple/callback', async (req, res) => {
-  const { code, redirect } = req.body
-  if (!code) return res.status(400).json({ error: 'Missing authorization code' })
-  try {
-    const clientSecret = await appleSignin.getClientSecret({
-      clientID: APPLE_CLIENT_ID,
-      teamID: APPLE_TEAM_ID,
-      keyIdentifier: APPLE_KEY_ID,
-      privateKey: APPLE_PRIVATE_KEY.replace(/\\n/g, '\n')
-    })
-
-    const body = new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: APPLE_REDIRECT_URI,
-      client_id: APPLE_CLIENT_ID,
-      client_secret: clientSecret
-    })
-
-    const tokenRes = await fetch('https://appleid.apple.com/auth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body
-    })
-
-    if (!tokenRes.ok) {
-      const errText = await tokenRes.text()
-      return res.status(401).json({ error: `Apple token exchange failed: ${errText}` })
-    }
-
-    const tokenJson = await tokenRes.json()
-    const { id_token: idToken } = tokenJson
-    if (!idToken) return res.status(401).json({ error: 'Missing id_token from Apple' })
-
-    const appleProfile = await appleSignin.verifyIdToken(idToken, {
-      audience: APPLE_CLIENT_ID
-    })
-
-    const { user, created } = await findOrCreateUser({
-      provider: 'apple',
-      providerId: appleProfile.sub,
-      email: appleProfile.email || null,
-      name: appleProfile.email?.split?.('@')?.[0] || 'Apple User',
-      avatar: null
-    })
-    const sessionUser = { ...user, sub: `apple:${appleProfile.sub}` }
-
-    const session = issueSession(sessionUser)
-    setSessionCookie(res, session)
-    const target =
-      redirect ||
-      (created ? `${APP_ORIGIN}/register?prefill=apple` : `${APP_ORIGIN}/dashboard`)
-    res.redirect(target)
-  } catch (err) {
-    console.error('Apple callback error', err)
-    res.status(500).json({ error: 'Apple auth failed' })
   }
 })
 

@@ -78,10 +78,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { AUTH_SERVER_CONFIG_ERROR, AUTH_SERVER_ORIGIN, buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { getStableDeviceId, loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
 
 const auth = useAuthStore()
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
 const BUBBLE_SIZE = 50
 const BUBBLE_PADDING = 8
 const PANEL_MIN_WIDTH = 300
@@ -145,6 +145,12 @@ function defaultBubblePosition() {
     x: Math.max(BUBBLE_PADDING, viewport.value.width - BUBBLE_SIZE - 16),
     y: Math.max(BUBBLE_PADDING, viewport.value.height - BUBBLE_SIZE - 16)
   }
+}
+
+function ensureAuthServerConfigured() {
+  if (AUTH_SERVER_ORIGIN || import.meta.env.DEV) return true
+  errorMessage.value = AUTH_SERVER_CONFIG_ERROR
+  return false
 }
 
 function maxPanelWidth() {
@@ -589,7 +595,7 @@ async function scrollToBottom() {
 }
 
 async function ensureConversation() {
-  const listResponse = await fetch(`${AUTH_SERVER_ORIGIN}/api/ai/chat/conversations`, {
+  const listResponse = await fetch(buildAuthServerUrl('/api/ai/chat/conversations'), {
     credentials: 'include'
   })
   const listData = await listResponse.json().catch(() => ({}))
@@ -601,7 +607,7 @@ async function ensureConversation() {
     return
   }
 
-  const createResponse = await fetch(`${AUTH_SERVER_ORIGIN}/api/ai/chat/conversations`, {
+  const createResponse = await fetch(buildAuthServerUrl('/api/ai/chat/conversations'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -616,12 +622,9 @@ async function ensureConversation() {
 
 async function loadMessages() {
   if (!conversationId.value) return
-  const response = await fetch(
-    `${AUTH_SERVER_ORIGIN}/api/ai/chat/messages?conversationId=${conversationId.value}`,
-    {
-      credentials: 'include'
-    }
-  )
+  const response = await fetch(buildAuthServerUrl(`/api/ai/chat/messages?conversationId=${conversationId.value}`), {
+    credentials: 'include'
+  })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new Error(payload?.error || 'Unable to load messages.')
@@ -635,6 +638,10 @@ async function openChat() {
   isOpen.value = true
   errorMessage.value = ''
   loading.value = true
+  if (!ensureAuthServerConfigured()) {
+    loading.value = false
+    return
+  }
   try {
     await ensureConversation()
     await loadMessages()
@@ -670,6 +677,12 @@ async function sendMessage() {
   sending.value = true
   errorMessage.value = ''
 
+  if (!ensureAuthServerConfigured()) {
+    sending.value = false
+    draftMessage.value = message
+    return
+  }
+
   const optimisticUserMessage = normalizeMessage({
     id: `tmp-user-${Date.now()}`,
     role: 'user',
@@ -680,7 +693,7 @@ async function sendMessage() {
   await scrollToBottom()
 
   try {
-    const response = await fetch(`${AUTH_SERVER_ORIGIN}/api/ai/chat/messages`, {
+    const response = await fetch(buildAuthServerUrl('/api/ai/chat/messages'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

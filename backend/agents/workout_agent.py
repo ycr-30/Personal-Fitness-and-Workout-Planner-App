@@ -19,6 +19,9 @@ EN_SECTION_RE = re.compile(
     r"Target calories and protein|Meal plan|Weekly adjustment rule|Snack guardrails)\b",
     re.I,
 )
+DAY_COUNT_RE = re.compile(r"\b([3-6])[- ]day\b|([3-6])\s*天", re.I)
+UPPER_LOWER_RE = re.compile(r"\bupper/?lower\b|(?:上肢下肢|上下肢)", re.I)
+HYPERTROPHY_RE = re.compile(r"\bhypertrophy\b|(?:增肌|肌肥大)", re.I)
 
 
 def _contains_cjk(text: str) -> bool:
@@ -33,6 +36,27 @@ def _is_cjk_user_message(text: str) -> bool:
     return _contains_cjk(text)
 
 
+def _original_user_message(text: str) -> str:
+    source = str(text or "").strip()
+    if not source:
+        return ""
+    head = source.split("\n\n", 1)[0].strip()
+    return head or source
+
+
+def _requested_training_days(text: str) -> int | None:
+    match = DAY_COUNT_RE.search(text or "")
+    if not match:
+        return None
+    for group in match.groups():
+        if group:
+            try:
+                return int(group)
+            except Exception:
+                return None
+    return None
+
+
 def _looks_like_markdown_table(text: str) -> bool:
     lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
     if len(lines) < 2:
@@ -43,6 +67,7 @@ def _looks_like_markdown_table(text: str) -> bool:
 
 
 def _needs_rewrite(user_message: str, text: str) -> bool:
+    original_message = _original_user_message(user_message)
     body = (text or "").strip()
     if not body:
         return True
@@ -54,7 +79,7 @@ def _needs_rewrite(user_message: str, text: str) -> bool:
         return True
     if NUTRITION_LEAK_RE.search(body):
         return True
-    if _is_cjk_user_message(user_message):
+    if _is_cjk_user_message(original_message):
         if EN_SECTION_RE.search(body):
             return True
         english_words = re.findall(r"[A-Za-z]{3,}", body)
@@ -79,8 +104,79 @@ def _strip_nutrition_leak(text: str) -> str:
     return "\n".join(kept_lines)
 
 
+def _fallback_training_plan(user_message: str, is_cjk: bool) -> str:
+    original = _original_user_message(user_message)
+    day_count = _requested_training_days(original) or 4
+    upper_lower = bool(UPPER_LOWER_RE.search(original))
+    hypertrophy = bool(HYPERTROPHY_RE.search(original))
+
+    if day_count == 4 or upper_lower:
+        if is_cjk:
+            return "\n".join(
+                [
+                    f"- 第1天 上肢：卧推 4x6-8，划船 4x8-10，上斜哑铃卧推 3x8-10，下拉 3x10-12，侧平举 3x12-15。",
+                    "- 第2天 下肢：深蹲 4x6-8，罗马尼亚硬拉 4x8-10，腿举 3x10-12，腿弯举 3x10-12，小腿提踵 3x12-15。",
+                    "- 第3天 上肢：肩推 4x6-8，坐姿划船 4x8-10，双杠臂屈伸或俯卧撑 3x8-12，面拉 3x12-15，弯举 3x10-12。",
+                    "- 第4天 下肢：硬拉 3x4-6，保加利亚分腿蹲 3x8-10，臀桥 3x8-10，腿屈伸 3x12-15，核心训练 3组。",
+                ]
+            )
+        return "\n".join(
+            [
+                "- Day 1 Upper: bench press 4x6-8, row 4x8-10, incline dumbbell press 3x8-10, lat pulldown 3x10-12, lateral raise 3x12-15.",
+                "- Day 2 Lower: squat 4x6-8, Romanian deadlift 4x8-10, leg press 3x10-12, leg curl 3x10-12, calf raise 3x12-15.",
+                "- Day 3 Upper: overhead press 4x6-8, seated row 4x8-10, dips or push-ups 3x8-12, face pulls 3x12-15, curls 3x10-12.",
+                "- Day 4 Lower: deadlift 3x4-6, Bulgarian split squat 3x8-10, hip thrust 3x8-10, leg extension 3x12-15, core work 3 rounds.",
+            ]
+        )
+
+    if is_cjk:
+        return (
+            "- 训练日A：深蹲 4x6-8，卧推 4x6-8，划船 4x8-10，腿弯举 3x10-12，平板支撑 3组。\n"
+            "- 训练日B：硬拉 3x4-6，肩推 4x6-8，下拉 4x8-10，箭步蹲 3x8-10，卷腹 3组。\n"
+            "- 每周按 A-B-A / B-A-B 轮换。"
+        )
+    return (
+        "- Day A: squat 4x6-8, bench press 4x6-8, row 4x8-10, leg curl 3x10-12, plank 3 rounds.\n"
+        "- Day B: deadlift 3x4-6, overhead press 4x6-8, lat pulldown 4x8-10, lunges 3x8-10, crunches 3 rounds.\n"
+        "- Alternate A-B-A and B-A-B across weeks."
+    )
+
+
+def _fallback_answer(user_message: str, user_profile: dict[str, Any] | None = None) -> str:
+    original = _original_user_message(user_message)
+    is_cjk = _is_cjk_user_message(original)
+    day_count = _requested_training_days(original) or 4
+    goal = "增肌" if HYPERTROPHY_RE.search(original) else "提升力量与训练一致性"
+    goal_en = "hypertrophy" if HYPERTROPHY_RE.search(original) else "strength and consistency"
+
+    if is_cjk:
+        return (
+            "目标与前提\n"
+            f"- 目标先按{goal}处理。\n"
+            f"- 先给你一个最适合的 {day_count} 天训练安排；如有伤病或器械限制，再单独调整。\n\n"
+            "训练安排\n"
+            f"{_fallback_training_plan(original, True)}\n\n"
+            "进阶规则\n"
+            "- 当同一动作在所有工作组都达到次数上限且动作稳定时，下次加重 2.5-5%。\n\n"
+            "恢复与注意事项\n"
+            "- 每次训练前做 5-8 分钟热身；主动作保留 1-2 次余力；连续疲劳明显时先减一组而不是硬顶。"
+        )
+    return (
+        "Goal and assumptions\n"
+        f"- Treat the main goal as {goal_en}.\n"
+        f"- Start with one best-fit {day_count}-day plan and adjust later if you have injury limits or equipment constraints.\n\n"
+        "Training plan\n"
+        f"{_fallback_training_plan(original, False)}\n\n"
+        "Progression rule\n"
+        "- Increase load by 2.5-5% once every work set reaches the top of the rep range with solid form.\n\n"
+        "Safety and recovery\n"
+        "- Warm up for 5-8 minutes, leave 1-2 reps in reserve on main lifts, and reduce one set before pushing through obvious fatigue."
+    )
+
+
 def _rewrite_answer(user_message: str, draft_answer: str) -> str:
-    is_cjk = _is_cjk_user_message(user_message)
+    original_message = _original_user_message(user_message)
+    is_cjk = _is_cjk_user_message(original_message)
     target_language = "Chinese" if is_cjk else "English"
 
     if is_cjk:
@@ -117,7 +213,7 @@ def _rewrite_answer(user_message: str, draft_answer: str) -> str:
         "- Do NOT output JSON.\n"
         "- Keep advice concrete and actionable.\n"
         "- Ask at most ONE concise follow-up question only if critical info is missing and the answer would otherwise be unsafe or unusable.\n\n"
-        f"Original user question:\n{user_message}\n\n"
+        f"Original user question:\n{original_message}\n\n"
         f"Draft answer:\n{draft_answer}"
     )
     rewrite_msgs = [
@@ -167,11 +263,12 @@ def answer(
     use_rag: bool = False,
     external_evidence: list[dict[str, Any]] | None = None,
 ):
+    original_message = _original_user_message(message)
     evidence = []
     if use_rag:
         evidence.extend(
             retrieve(
-                message,
+                original_message,
                 topk=4,
                 min_sim=0.72,
                 source_types=["exercise", "strength", "workout", "free_exercise_db"],
@@ -179,16 +276,18 @@ def answer(
         )
 
     evidence.extend(_normalize_external_evidence(external_evidence))
-    user_block = _build_user_block(message, user_profile, evidence)
+    user_block = _build_user_block(original_message, user_profile, evidence)
 
     msgs = [
         {"role": "system", "content": WORKOUT_SYSTEM_PROMPT},
         {"role": "user", "content": user_block},
     ]
     out = manager.generate(msgs, adapter="workout")
-    if _needs_rewrite(message, out):
+    if _needs_rewrite(original_message, out):
         rewritten = _rewrite_answer(message, out).strip()
         if rewritten:
             out = rewritten
+    if _needs_rewrite(original_message, out):
+        out = _fallback_answer(original_message, user_profile)
     out = _strip_nutrition_leak(_fallback_clean(out)).strip()
     return out, evidence

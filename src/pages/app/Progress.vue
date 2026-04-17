@@ -827,10 +827,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
 import { getUserStorageKey } from '@/lib/userStorage'
 
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
 const CALORIES_PER_MINUTE = 6
 const DAY_MS = 86400000
 
@@ -3494,7 +3494,7 @@ async function fetchAiInsight() {
   aiError.value = ''
   aiLoading.value = true
   try {
-    const response = await fetch(`${AUTH_SERVER_ORIGIN}/api/ai/analytics/insights`, {
+    const response = await fetch(buildAuthServerUrl('/api/ai/analytics/insights'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

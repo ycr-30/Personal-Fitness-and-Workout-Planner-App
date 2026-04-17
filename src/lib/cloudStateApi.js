@@ -1,6 +1,5 @@
 import { getUserStorageKey } from './userStorage'
-
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
+import { buildAuthServerUrl } from './authServerOrigin'
 
 function readJson(key, fallback) {
   try {
@@ -21,7 +20,7 @@ export function getLocalAppState(user) {
 }
 
 export async function fetchCloudAppState() {
-  const response = await fetch(`${AUTH_SERVER_ORIGIN}/api/user/app-state`, {
+  const response = await fetch(buildAuthServerUrl('/api/user/app-state'), {
     credentials: 'include'
   })
   const payload = await response.json().catch(() => ({}))
@@ -57,7 +56,7 @@ export async function saveLocalAppStateToCloud(user) {
     throw new Error('User is required to save cloud app state.')
   }
   const state = getLocalAppState(user)
-  const response = await fetch(`${AUTH_SERVER_ORIGIN}/api/user/app-state`, {
+  const response = await fetch(buildAuthServerUrl('/api/user/app-state'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',

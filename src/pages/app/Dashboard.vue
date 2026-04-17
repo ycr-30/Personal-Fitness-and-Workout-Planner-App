@@ -639,6 +639,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { supabase } from '@/lib/supabaseClient'
 import { formatSupabaseError, mapMealEntryRow, mapWaterEntryRow, requireNutritionUser } from '@/lib/nutritionSupabase'
 import { buildFallbackNutritionTargetRecommendation } from '@/lib/nutritionGoalSync'
@@ -647,7 +648,6 @@ import { buildNutritionSummary } from '@/utils/nutritionCalculations'
 import { buildPlanGoalLink } from '@/utils/nutritionGoalMapping'
 import { buildWorkoutLocationSuggestions, getLatestWorkoutLocation } from '@/utils/workoutLocations'
 
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
 const AGENT_STAT_AGENT_ORDER = ['chat', 'analytics', 'nutrition']
 const AGENT_STAT_LABELS = {
   chat: 'Chat Agent',
@@ -1247,7 +1247,7 @@ async function refreshAgentStats() {
   agentStatsLoading.value = true
 
   try {
-    const response = await fetch(`${AUTH_SERVER_ORIGIN}/api/ai/agent-stats?days=7&scope=global`, {
+    const response = await fetch(buildAuthServerUrl('/api/ai/agent-stats?days=7&scope=global'), {
       credentials: 'include'
     })
 

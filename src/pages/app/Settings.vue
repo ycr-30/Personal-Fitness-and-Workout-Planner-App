@@ -402,12 +402,12 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useUserSettings } from '@/composables/useUserSettings'
+import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { defaultUserSettings, normalizeUserSettings } from '@/lib/userSettings'
 import { supabase } from '@/lib/supabaseClient'
 
 const router = useRouter()
 const auth = useAuthStore()
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000'
 const {
   settings,
   error,
@@ -721,7 +721,7 @@ async function submitDeleteAccount() {
       accessToken = sessionData.session?.access_token || ''
     }
 
-    const response = await fetch(`${AUTH_SERVER_ORIGIN}/api/account/delete`, {
+    const response = await fetch(buildAuthServerUrl('/api/account/delete'), {
       method: 'POST',
       credentials: 'include',
       headers: {

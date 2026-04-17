@@ -76,7 +76,7 @@
       <ul>
         <li>directly from you when you register, sign in, fill profile fields, log workouts, log food or hydration data, edit settings, or use AI chat</li>
         <li>automatically from your browser or device when the service sets an authenticated session cookie, records sync status, caches app state locally, or receives requests from your device</li>
-        <li>from identity providers when you choose Google sign-in, Apple sign-in, or email-based authentication flows</li>
+        <li>from identity providers when you choose Google sign-in or email-based authentication flows</li>
         <li>from service infrastructure used to host, secure, and support the application</li>
       </ul>
     </section>
@@ -194,7 +194,7 @@
       <ul>
         <li>cloud database, authentication, and storage providers, including Supabase where configured</li>
         <li>transactional email providers, including Resend where configured for verification and recovery emails</li>
-        <li>identity providers such as Google or Apple when you choose those sign-in methods</li>
+        <li>identity providers such as Google when you choose those sign-in methods</li>
         <li>AI, model, inference, retrieval, or embedding providers configured by the operator for chat or analytics features</li>
         <li>professional advisers, regulators, or law-enforcement authorities where disclosure is legally required or reasonably necessary to protect the service or others</li>
       </ul>

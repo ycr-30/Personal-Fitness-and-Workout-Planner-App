@@ -1,12 +1,12 @@
 // src/stores/auth.js
 import { defineStore } from 'pinia'
 import { supabase } from '@/lib/supabaseClient'
+import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { loadUserOnboardingAnswers, normalizeOnboardingAnswers, saveUserOnboardingAnswers } from '@/lib/userOnboardingCloud'
 
 const USERS_KEY = 'pf_users' // 所有注册用户（原型阶段使用浏览器本地存储）
 const CURRENT_KEY = 'pf_current_user' // 当前登录用户的账号键
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/ // 邮箱格式校验
-const AUTH_SERVER_ORIGIN = import.meta.env.VITE_AUTH_SERVER_ORIGIN || 'http://localhost:4000' // 鉴权服务地址
 let activeCloudOnboardingIdentity = ''
 let serverHydratePromise = null
 let lastServerHydrateAt = 0
@@ -179,7 +179,7 @@ export const useAuthStore = defineStore('auth', {
 
       serverHydratePromise = (async () => {
         try {
-        const res = await fetch(`${AUTH_SERVER_ORIGIN}/me`, {
+        const res = await fetch(buildAuthServerUrl('/me'), {
           credentials: 'include'
         })
         if (!res.ok) {
@@ -658,7 +658,7 @@ export const useAuthStore = defineStore('auth', {
           console.error('Supabase signOut after password reset failed', signOutError)
         }
         try {
-          await fetch(`${AUTH_SERVER_ORIGIN}/logout`, {
+          await fetch(buildAuthServerUrl('/logout'), {
             method: 'POST',
             credentials: 'include'
           })
@@ -725,7 +725,7 @@ export const useAuthStore = defineStore('auth', {
         const accessToken = data?.session?.access_token || ''
         if (!accessToken) return false
 
-        const response = await fetch(`${AUTH_SERVER_ORIGIN}/auth/supabase/session`, {
+        const response = await fetch(buildAuthServerUrl('/auth/supabase/session'), {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`
@@ -798,7 +798,7 @@ export const useAuthStore = defineStore('auth', {
 
     async logout() {
       try {
-        await fetch(`${AUTH_SERVER_ORIGIN}/logout`, {
+        await fetch(buildAuthServerUrl('/logout'), {
           method: 'POST',
           credentials: 'include'
         })
@@ -826,7 +826,7 @@ export const useAuthStore = defineStore('auth', {
         }
       }
       try {
-        await fetch(`${AUTH_SERVER_ORIGIN}/logout`, {
+        await fetch(buildAuthServerUrl('/logout'), {
           method: 'POST',
           credentials: 'include'
         })
@@ -951,7 +951,7 @@ export const useAuthStore = defineStore('auth', {
       // 如果有后端会话（通过 hydrateFromServer 获得 id/provider 等），优先写后端
       if (this.user.id) {
         try {
-          const res = await fetch(`${AUTH_SERVER_ORIGIN}/profile`, {
+          const res = await fetch(buildAuthServerUrl('/profile'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
