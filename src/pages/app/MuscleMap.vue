@@ -12,9 +12,9 @@
 
     <div v-if="baseError" class="error-banner">{{ baseError }}</div>
 
-    <div class="stage-layout">
+    <div class="stage-layout" :class="{ 'is-detail': isDetailStage }">
       <section class="stage-main">
-        <div class="map-stage">
+        <div v-if="!isDetailStage" class="map-stage">
           <div class="map-hero">
             <FrontBackMap
               :front-svg="frontSvg"
@@ -25,15 +25,9 @@
               @select="handleSelect"
             />
           </div>
-          <div class="map-hint" :class="{ active: isDetailStage }">
-            <span>{{ isDetailStage ? 'Selected' : 'Step 1' }}</span>
-            <p v-if="isDetailStage">
-              Filtering by {{ selectedMuscleLabel }}. Tap another muscle on the map or clear the current selection.
-            </p>
-            <p v-else>Select a muscle group on the map, then choose equipment on the right.</p>
-            <button v-if="isDetailStage" class="inline-link" type="button" @click="clearSelection">
-              Clear selection
-            </button>
+          <div class="map-hint">
+            <span>Step 1</span>
+            <p>Select a muscle group on the map, then choose equipment on the right.</p>
           </div>
         </div>
 
@@ -124,6 +118,27 @@
       <aside class="stage-sidebar">
         <div class="sidebar-card">
           <GenderToggle v-model="gender" :disabled="loadingBase" />
+        </div>
+
+        <div v-if="isDetailStage" class="sidebar-card compact-map">
+          <div class="compact-map-head">
+            <div>
+              <strong>{{ selectedMuscleLabel || 'Selected Muscle' }}</strong>
+              <p>Tap another muscle or clear the current selection.</p>
+            </div>
+            <button class="inline-link" type="button" @click="clearSelection">
+              Clear
+            </button>
+          </div>
+          <FrontBackMap
+            :front-svg="frontSvg"
+            :back-svg="backSvg"
+            :selected-slug="selectedSlug"
+            :loading="loadingBase"
+            :compact="true"
+            :show-labels="false"
+            @select="handleSelect"
+          />
         </div>
 
         <div class="sidebar-card equipment-card">
@@ -496,6 +511,10 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 
+.stage-layout.is-detail {
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 360px);
+}
+
 .stage-main {
   display: grid;
   gap: 16px;
@@ -531,11 +550,6 @@ onBeforeUnmount(() => {
   background: var(--surface-soft);
   color: var(--text-muted);
   font-size: 13px;
-}
-
-.map-hint.active {
-  justify-content: space-between;
-  flex-wrap: wrap;
 }
 
 .map-hint span {
@@ -712,6 +726,29 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-soft);
   display: grid;
   gap: 12px;
+}
+
+.compact-map {
+  padding: 10px;
+}
+
+.compact-map-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.compact-map-head strong {
+  display: block;
+  margin: 0 0 4px;
+}
+
+.compact-map-head p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .equipment-card :deep(.equipment-filter) {
