@@ -86,7 +86,7 @@
             <button v-else class="btn ghost" type="button" @click="startBodyEdit">Change</button>
           </div>
         </header>
-        <div class="form-grid">
+        <div class="form-grid metrics-grid">
           <div class="field">
             <label>Biological Sex</label>
             <div class="segmented">
@@ -111,9 +111,6 @@
           <div class="field">
             <label>Date of Birth</label>
             <input v-model="form.birthday" type="date" :disabled="!isEditingBody" />
-            <p v-if="bodyFatNeedsBirthday" class="field-note">
-              Add your date of birth to unlock automatic body fat estimation.
-            </p>
           </div>
           <div class="field">
             <label>Height (cm)</label>
@@ -126,16 +123,15 @@
           <div class="field readonly">
             <label>Estimated body fat (%)</label>
             <input :value="bodyFatDisplay" type="text" readonly />
-            <p class="field-note">
-              Calculated automatically from height, weight, date of birth, and sex using the Deurenberg equation.
-            </p>
-            <p v-if="bodyFatMissingHint" class="field-note">
-              {{ bodyFatMissingHint }}
-            </p>
-            <p v-else-if="bodyFatWarning" class="field-note warning">
-              {{ bodyFatWarning }}
-            </p>
           </div>
+        </div>
+        <div class="metrics-note">
+          <p class="metrics-note-copy">
+            {{ bodyFatInfo }}
+          </p>
+          <p v-if="bodyFatWarning" class="metrics-note-copy warning">
+            {{ bodyFatWarning }}
+          </p>
         </div>
       </section>
 
@@ -229,6 +225,12 @@ function normalizeNumberValue(value) {
   return Number.isFinite(parsed) ? parsed : ''
 }
 
+function resetFeedback() {
+  savedMessage.value = ''
+  savedTone.value = 'success'
+  profileError.value = ''
+}
+
 const setFormFromSource = (source = {}) => {
   const name = source?.displayName || source?.name || ''
   const parts = name.trim().split(' ')
@@ -306,31 +308,64 @@ function formatMissingFields(fields = []) {
   return `${fields.slice(0, -1).join(', ')}, and ${fields[fields.length - 1]}`
 }
 
-const bodyFat = computed(() => {
-  const age = getAgeFromBirthday(form.birthday)
-  if (!form.height || !form.weight || !age) return null
-  const heightMeter = Number(form.height) / 100
+function calculateBodyFatEstimate({ heightCm, weightKg, sex, age = null }) {
+  const height = Number(heightCm)
+  const weight = Number(weightKg)
+  if (!height || !weight) return null
+  const heightMeter = height / 100
   if (!heightMeter) return null
-  const bmi = Number(form.weight) / (heightMeter * heightMeter)
+  const bmi = weight / (heightMeter * heightMeter)
   if (!Number.isFinite(bmi)) return null
-  const sexFlag = form.sex === 'male' ? 1 : 0
-  const result = 1.2 * bmi + 0.23 * age - 10.8 * sexFlag - 5.4
+  const sexFlag = sex === 'male' ? 1 : 0
+  const result = age != null
+    ? 1.2 * bmi + 0.23 * age - 10.8 * sexFlag - 5.4
+    : 1.2 * bmi - 10.8 * sexFlag - 5.4
   if (!Number.isFinite(result)) return null
   return Number(result.toFixed(1))
+}
+
+const bodyFatAge = computed(() => getAgeFromBirthday(form.birthday))
+const hasBodyFatInputs = computed(() => Boolean(form.height && form.weight))
+const hasStartedBodyFatInputs = computed(() => Boolean(form.height || form.weight || form.birthday))
+const bodyFatMode = computed(() => {
+  if (!hasBodyFatInputs.value) return 'none'
+  return bodyFatAge.value != null ? 'full' : 'quick'
+})
+
+const bodyFat = computed(() => {
+  if (!hasBodyFatInputs.value) return null
+  return calculateBodyFatEstimate({
+    heightCm: form.height,
+    weightKg: form.weight,
+    sex: form.sex,
+    age: bodyFatAge.value
+  })
 })
 
 const bodyFatDisplay = computed(() => (bodyFat.value != null ? `${bodyFat.value}` : '--'))
-const bodyFatNeedsBirthday = computed(() => !form.birthday && (form.height || form.weight))
-const hasStartedBodyFatInputs = computed(() => Boolean(form.height || form.weight || form.birthday))
-const bodyFatMissingHint = computed(() => {
-  if (!hasStartedBodyFatInputs.value) return ''
+const bodyFatInfo = computed(() => {
+  if (!hasStartedBodyFatInputs.value) {
+    return 'Enter height and weight to estimate body fat automatically.'
+  }
+
   const missing = []
   if (!form.height) missing.push('height')
   if (!form.weight) missing.push('weight')
-  if (!form.birthday) missing.push('date of birth')
-  if (!missing.length) return ''
+  if (missing.length) {
+    return `Add ${formatMissingFields(missing)} to calculate this estimate.`
+  }
+
+  if (bodyFatMode.value === 'quick') {
+    return 'Showing a quick estimate from height, weight, and sex. Add date of birth for a more accurate result.'
+  }
+
+  if (bodyFatMode.value === 'full') {
+    return 'Calculated automatically from height, weight, date of birth, and sex using the Deurenberg equation.'
+  }
+
   return `Add ${formatMissingFields(missing)} to calculate this estimate.`
 })
+
 const bodyFatWarning = computed(() => {
   if (bodyFat.value == null) return ''
   if (bodyFat.value < 3 || bodyFat.value > 60) {
@@ -360,6 +395,7 @@ function onAvatarChange(event) {
 }
 
 function startPersonalEdit() {
+  resetFeedback()
   personalBackup.value = {
     firstName: form.firstName,
     lastName: form.lastName,
@@ -369,6 +405,7 @@ function startPersonalEdit() {
 }
 
 function cancelPersonalEdit() {
+  resetFeedback()
   if (personalBackup.value) {
     form.firstName = personalBackup.value.firstName
     form.lastName = personalBackup.value.lastName
@@ -390,8 +427,13 @@ async function savePersonal() {
     weight: form.weight
   })
   if (result?.syncError) {
-    savedTone.value = 'error'
-    savedMessage.value = result.error || 'Unable to save profile right now.'
+    isEditingPersonal.value = false
+    profileError.value = ''
+    savedTone.value = 'neutral'
+    savedMessage.value = 'Profile updated on this device. Cloud sync is unavailable right now.'
+    setTimeout(() => {
+      savedMessage.value = ''
+    }, 2600)
     return
   }
   isEditingPersonal.value = false
@@ -406,6 +448,7 @@ async function savePersonal() {
 }
 
 function startBodyEdit() {
+  resetFeedback()
   bodyBackup.value = {
     sex: form.sex,
     birthday: form.birthday,
@@ -416,6 +459,7 @@ function startBodyEdit() {
 }
 
 function cancelBodyEdit() {
+  resetFeedback()
   if (bodyBackup.value) {
     form.sex = bodyBackup.value.sex
     form.birthday = bodyBackup.value.birthday
@@ -438,8 +482,13 @@ async function saveBody() {
     weight: form.weight
   })
   if (result?.syncError) {
-    savedTone.value = 'error'
-    savedMessage.value = result.error || 'Unable to save profile right now.'
+    isEditingBody.value = false
+    profileError.value = ''
+    savedTone.value = 'neutral'
+    savedMessage.value = 'Profile updated on this device. Cloud sync is unavailable right now.'
+    setTimeout(() => {
+      savedMessage.value = ''
+    }, 2600)
     return
   }
   isEditingBody.value = false
@@ -702,6 +751,27 @@ onMounted(() => {
   gap: 16px;
 }
 
+.metrics-grid {
+  align-items: start;
+}
+
+.metrics-note {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.metrics-note-copy {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.metrics-note-copy.warning {
+  color: #b45309;
+}
+
 .section-note {
   margin: 16px 0 0;
   font-size: 13px;
@@ -724,17 +794,6 @@ onMounted(() => {
   gap: 8px;
 }
 
-.field-note {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text-muted);
-}
-
-.field-note.warning {
-  color: #b45309;
-}
-
 label {
   font-size: 13px;
   color: var(--text-muted);
@@ -742,9 +801,11 @@ label {
 }
 
 input {
+  box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
+  min-height: 52px;
   font-size: 14px;
   background: var(--surface);
 }
@@ -760,7 +821,10 @@ input:disabled {
 }
 
 .segmented {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
   gap: 8px;
   padding: 6px;
   background: var(--surface-soft);
@@ -768,6 +832,8 @@ input:disabled {
 }
 
 .segment {
+  flex: 1 1 0;
+  min-height: 40px;
   border: none;
   border-radius: 999px;
   padding: 8px 14px;
@@ -775,6 +841,8 @@ input:disabled {
   font-size: 13px;
   color: var(--text-muted);
   background: transparent;
+  display: grid;
+  place-items: center;
 }
 
 .segment:disabled {
