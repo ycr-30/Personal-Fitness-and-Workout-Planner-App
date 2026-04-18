@@ -34,9 +34,9 @@
             </div>
           </div>
         </div>
-        <label class="edit-avatar">
+        <label class="edit-avatar" title="Upload a new profile photo">
           <input type="file" accept="image/*" @change="onAvatarChange" />
-          <span>Edit</span>
+          <span>Change Photo</span>
         </label>
       </div>
     </section>
@@ -349,6 +349,11 @@ async function savePersonal() {
     height: form.height,
     weight: form.weight
   })
+  if (result?.syncError) {
+    savedTone.value = 'error'
+    savedMessage.value = result.error || 'Unable to save profile right now.'
+    return
+  }
   isEditingPersonal.value = false
   profileError.value = ''
   savedTone.value = result?.cloudSaved === false ? 'neutral' : 'success'
@@ -392,6 +397,11 @@ async function saveBody() {
     height: form.height,
     weight: form.weight
   })
+  if (result?.syncError) {
+    savedTone.value = 'error'
+    savedMessage.value = result.error || 'Unable to save profile right now.'
+    return
+  }
   isEditingBody.value = false
   profileError.value = ''
   savedTone.value = result?.cloudSaved === false ? 'neutral' : 'success'

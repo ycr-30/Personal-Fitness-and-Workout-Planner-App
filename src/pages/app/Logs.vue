@@ -38,13 +38,20 @@
           <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
         </svg>
         <input
-          v-model.trim="searchInput"
+          ref="searchField"
+          v-model="searchQuery"
           type="search"
-          placeholder="Search by workout name..."
-          @keydown.enter.prevent="applySearch"
+          placeholder="Search workouts or muscle groups..."
+          @keydown.esc.prevent="clearSearch"
         />
-        <button type="button" class="search-button" @click="applySearch" aria-label="Search">
-          🔍
+        <button
+          v-if="searchQuery.trim()"
+          type="button"
+          class="search-clear"
+          @click="clearSearch"
+          aria-label="Clear search"
+        >
+          ×
         </button>
       </label>
       <label class="select">
@@ -338,7 +345,7 @@ import { buildWorkoutLocationSuggestions, getLatestWorkoutLocation } from '@/uti
 const auth = useAuthStore()
 const storageKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
 const workouts = ref([])
-const searchInput = ref('')
+const searchField = ref(null)
 const searchQuery = ref('')
 const showForm = ref(false)
 const statusFilter = ref('all')
@@ -518,8 +525,9 @@ function wordStartsWith(text, keyword) {
     .some((part) => part.startsWith(keyword))
 }
 
-function applySearch() {
-  searchQuery.value = searchInput.value.trim()
+function clearSearch() {
+  searchQuery.value = ''
+  searchField.value?.focus?.()
 }
 
 const filteredWorkouts = computed(() => {
@@ -1240,10 +1248,10 @@ watch(
   width: 100%;
   font-size: 14px;
   color: inherit;
-  padding-right: 34px;
+  padding-right: 40px;
 }
 
-.search-button {
+.search-clear {
   position: absolute;
   right: 10px;
   width: 26px;
@@ -1259,12 +1267,19 @@ watch(
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
-.search-button:hover {
+.search-clear:hover {
   background: var(--surface);
 }
 
 .search input::placeholder {
   color: var(--text-muted);
+}
+
+.search input::-webkit-search-decoration,
+.search input::-webkit-search-cancel-button,
+.search input::-webkit-search-results-button,
+.search input::-webkit-search-results-decoration {
+  -webkit-appearance: none;
 }
 
 .select {

@@ -119,38 +119,44 @@
         </div>
         <p class="chart-status">{{ weightStatusLine }}</p>
         <div class="chart-area">
-          <div class="chart-grid">
-            <div class="y-axis">
-              <span v-for="label in weightChartAxis.yLabels" :key="label">{{ label }}</span>
+          <template v-if="weightVisibleLogCount > 0">
+            <div class="chart-grid">
+              <div class="y-axis">
+                <span v-for="label in weightChartAxis.yLabels" :key="label">{{ label }}</span>
+              </div>
+              <div class="chart-plot">
+                <svg viewBox="0 0 520 180" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                  <path
+                    :d="weightChart.line"
+                    fill="none"
+                    stroke="#ef4444"
+                    stroke-width="3"
+                    stroke-linecap="round"
+                  />
+                  <circle
+                    v-for="point in weightChart.points"
+                    :key="point.x"
+                    :cx="point.x"
+                    :cy="point.y"
+                    r="4.5"
+                    fill="#fff"
+                    stroke="#ef4444"
+                    stroke-width="2"
+                  />
+                </svg>
+              </div>
             </div>
-            <div class="chart-plot">
-              <svg viewBox="0 0 520 180" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-                <path
-                  :d="weightChart.line"
-                  fill="none"
-                  stroke="#ef4444"
-                  stroke-width="3"
-                  stroke-linecap="round"
-                />
-                <circle
-                  v-for="point in weightChart.points"
-                  :key="point.x"
-                  :cx="point.x"
-                  :cy="point.y"
-                  r="4.5"
-                  fill="#fff"
-                  stroke="#ef4444"
-                  stroke-width="2"
-                />
-              </svg>
+            <div class="chart-labels x-axis">
+              <span v-for="label in weightChartAxis.xLabels" :key="label">{{ label }}</span>
             </div>
-          </div>
-          <div class="chart-labels x-axis">
-            <span v-for="label in weightChartAxis.xLabels" :key="label">{{ label }}</span>
+          </template>
+          <div v-else class="chart-empty-state">
+            <strong>No weight logs in this range.</strong>
+            <p>Change the time range or add a new weigh-in to render the trend line.</p>
           </div>
         </div>
         <div class="chart-summary">
-          <span>{{ weightVisibleLogCount }} logs in visible range</span>
+          <span>{{ weightVisibleRangeLabel }}</span>
           <span>{{ weightSummaryHint }}</span>
         </div>
       </article>
@@ -1769,11 +1775,12 @@ const streakDisplay = computed(() => {
 const bestStreak = computed(() => calcBestStreak(activityDatesSet.value))
 
 const weightChart = computed(() => {
-  if (!hasWeightData.value) {
+  if (!hasWeightData.value || !visibleWeightRecords.value.length) {
     return { line: '', area: '', points: [], min: NaN, max: NaN }
   }
   const rangeDays = weightRangeOptions.find((item) => item.value === weightRange.value)?.days || 30
-  const values = buildWeeklyWeightSeries(planState.value.weightRecords, latestWeight.value, rangeDays)
+  const seededWeight = Number(visibleWeightRecords.value[0]?.weight ?? latestWeight.value) || latestWeight.value
+  const values = buildWeeklyWeightSeries(visibleWeightRecords.value, seededWeight, rangeDays)
   return buildWeightChart(values)
 })
 
@@ -1802,6 +1809,11 @@ const visibleWeightRecords = computed(() => {
 })
 
 const weightVisibleLogCount = computed(() => visibleWeightRecords.value.length)
+const weightVisibleRangeLabel = computed(() => {
+  if (!weightVisibleLogCount.value) return 'No weight logs in this range'
+  if (weightVisibleLogCount.value === 1) return '1 log in visible range'
+  return `${weightVisibleLogCount.value} logs in visible range`
+})
 
 const weightHeadline = computed(() => {
   if (!hasWeightData.value) return 'No weight logs yet'
@@ -1810,6 +1822,8 @@ const weightHeadline = computed(() => {
 
 const weightStatusLine = computed(() => {
   const rangeDays = weightRangeOptions.find((item) => item.value === weightRange.value)?.days || 30
+  if (!hasWeightData.value) return 'Add your first weigh-in to start the trend.'
+  if (!visibleWeightRecords.value.length) return `No weight logs in the last ${rangeDays} days`
   if (visibleWeightRecords.value.length < 2) return `Stable in the last ${rangeDays} days`
   const first = Number(visibleWeightRecords.value[0]?.weight) || 0
   const last = Number(visibleWeightRecords.value[visibleWeightRecords.value.length - 1]?.weight) || 0
@@ -1820,7 +1834,8 @@ const weightStatusLine = computed(() => {
 })
 
 const weightSummaryHint = computed(() => {
-  if (!weightVisibleLogCount.value) return 'Add more weigh-ins to start your trend.'
+  if (!hasWeightData.value) return 'Add your first weigh-in to unlock this chart.'
+  if (!weightVisibleLogCount.value) return 'Change the range or add a new weigh-in to start the trend.'
   if (weightVisibleLogCount.value < 4) return 'Add more weigh-ins for a clearer trend.'
   return 'The trend is becoming clearer with consistent logging.'
 })
@@ -2832,6 +2847,29 @@ onBeforeUnmount(() => {
 
 .chart-labels.x-axis {
   margin-top: 0;
+}
+
+.chart-empty-state {
+  min-height: 142px;
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  background: var(--surface-muted);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 24px;
+}
+
+.chart-empty-state strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 15px;
+}
+
+.chart-empty-state p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .filter {

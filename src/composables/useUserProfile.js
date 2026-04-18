@@ -1,7 +1,6 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
-import { formatSupabaseError } from '@/lib/nutritionSupabase'
 
 const profile = ref({
   firstName: '',
@@ -78,6 +77,42 @@ function normalizeUserProfile(source = {}, authUser = null) {
   }
 }
 
+function buildProfileErrorMessage(err, phase = 'load') {
+  const message = String(err?.message || err?.details || '')
+    .trim()
+    .toLowerCase()
+
+  if (!message) {
+    return phase === 'save'
+      ? 'Unable to save profile right now. Please try again.'
+      : 'Unable to load profile right now. Please try again.'
+  }
+
+  if (
+    message.includes('user_profiles_height_cm_check') ||
+    message.includes('user_profiles_weight_kg_check') ||
+    message.includes('violates check constraint')
+  ) {
+    return phase === 'save'
+      ? 'Unable to save profile. Check that height is 120-230 cm and weight is 35-180 kg, or leave them blank after the profile migration is applied.'
+      : 'Unable to load profile. Please complete your body metrics or try again later.'
+  }
+
+  if (
+    message.includes('new row for relation') ||
+    message.includes('invalid input syntax') ||
+    message.includes('numeric field overflow')
+  ) {
+    return phase === 'save'
+      ? 'Unable to save profile. Please review your body metrics and try again.'
+      : 'Unable to load profile. Please complete your body metrics or try again later.'
+  }
+
+  return phase === 'save'
+    ? 'Unable to save profile right now. Please try again.'
+    : 'Unable to load profile right now. Please try again.'
+}
+
 function buildUserProfilePayload(nextProfile, userId) {
   const normalized = normalizeUserProfile(nextProfile)
   const firstName = normalized.firstName.trim()
@@ -119,7 +154,7 @@ function syncAuthSnapshot(auth, nextProfile, supabaseUser = null) {
   })
 }
 
-async function ensureUserProfileRow(auth, supabaseUser) {
+async function readUserProfileRow(supabaseUser) {
   const { data, error: selectError } = await supabase
     .from('user_profiles')
     .select('*')
@@ -127,17 +162,7 @@ async function ensureUserProfileRow(auth, supabaseUser) {
     .maybeSingle()
 
   if (selectError) throw selectError
-  if (data) return data
-
-  const seed = buildUserProfilePayload(normalizeUserProfile({}, auth.user), supabaseUser.id)
-  const { data: inserted, error: insertError } = await supabase
-    .from('user_profiles')
-    .insert([seed])
-    .select('*')
-    .single()
-
-  if (insertError) throw insertError
-  return inserted
+  return data || null
 }
 
 export function useUserProfile() {
@@ -150,9 +175,10 @@ export function useUserProfile() {
     activeIdentity = identity
     loading.value = true
     error.value = ''
+    let supabaseUser = null
 
     try {
-      const supabaseUser = await getSupabaseUser()
+      supabaseUser = await getSupabaseUser()
       if (!supabaseUser?.id) {
         const fallback = normalizeUserProfile({}, auth.user)
         profile.value = fallback
@@ -165,8 +191,8 @@ export function useUserProfile() {
         return fallback
       }
 
-      const row = await ensureUserProfileRow(auth, supabaseUser)
-      const normalized = normalizeUserProfile(row, auth.user)
+      const row = await readUserProfileRow(supabaseUser)
+      const normalized = normalizeUserProfile(row || {}, auth.user)
       profile.value = normalized
       syncAuthSnapshot(auth, normalized, supabaseUser)
       syncMeta.value = {
@@ -177,9 +203,20 @@ export function useUserProfile() {
       }
       return normalized
     } catch (err) {
-      error.value = formatSupabaseError(err, 'Unable to load profile.')
+      error.value = buildProfileErrorMessage(err, 'load')
       const fallback = normalizeUserProfile({}, auth.user)
       profile.value = fallback
+      syncMeta.value = {
+        connected: Boolean(supabaseUser?.id),
+        source: supabaseUser?.id ? 'cloud-error' : 'local',
+        lastSyncedAt: fallback.updatedAt || null,
+        accountLabel:
+          supabaseUser?.email ||
+          auth.user?.email ||
+          auth.user?.account ||
+          auth.user?.name ||
+          'Current user'
+      }
       return fallback
     } finally {
       loading.value = false
@@ -192,9 +229,10 @@ export function useUserProfile() {
     error.value = ''
     profile.value = normalized
     syncAuthSnapshot(auth, normalized)
+    let supabaseUser = null
 
     try {
-      const supabaseUser = await getSupabaseUser()
+      supabaseUser = await getSupabaseUser()
       if (!supabaseUser?.id) {
         syncMeta.value = {
           connected: false,
@@ -204,7 +242,8 @@ export function useUserProfile() {
         }
         return {
           profile: normalized,
-          cloudSaved: false
+          cloudSaved: false,
+          syncError: false
         }
       }
 
@@ -228,19 +267,27 @@ export function useUserProfile() {
       }
       return {
         profile: normalized,
-        cloudSaved: true
+        cloudSaved: true,
+        syncError: false
       }
     } catch (err) {
-      error.value = formatSupabaseError(err, 'Unable to save profile.')
+      error.value = buildProfileErrorMessage(err, 'save')
       syncMeta.value = {
-        connected: false,
-        source: 'local',
+        connected: Boolean(supabaseUser?.id),
+        source: supabaseUser?.id ? 'cloud-error' : 'local',
         lastSyncedAt: normalized.updatedAt || null,
-        accountLabel: auth.user?.email || auth.user?.account || auth.user?.name || 'Current user'
+        accountLabel:
+          supabaseUser?.email ||
+          auth.user?.email ||
+          auth.user?.account ||
+          auth.user?.name ||
+          'Current user'
       }
       return {
         profile: normalized,
-        cloudSaved: false
+        cloudSaved: false,
+        syncError: true,
+        error: error.value
       }
     } finally {
       saving.value = false

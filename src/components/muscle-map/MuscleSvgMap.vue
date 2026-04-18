@@ -52,6 +52,38 @@ function updateSelection() {
   })
 }
 
+function enhanceHitboxes() {
+  const el = container.value
+  if (!el) return
+  const groups = el.querySelectorAll('.muscle-group')
+  groups.forEach((group) => {
+    group.querySelectorAll('.muscle-hitbox').forEach((node) => node.remove())
+
+    const slug = normalizeSlug(getGroupSlug(group))
+    const clickable = Boolean(slug) && !NON_SELECTABLE.has(slug)
+    group.classList.toggle('is-clickable', clickable)
+    if (!clickable) return
+
+    group.querySelectorAll('.muscle').forEach((shape) => {
+      const hitbox = shape.cloneNode(false)
+      const hitboxClasses = String(shape.getAttribute('class') || '')
+        .split(/\s+/)
+        .filter((name) => name && name !== 'muscle')
+        .join(' ')
+
+      hitbox.removeAttribute('id')
+      hitbox.setAttribute('class', `${hitboxClasses} muscle-hitbox`.trim())
+      hitbox.setAttribute('fill', 'none')
+      hitbox.setAttribute('stroke', 'rgba(0,0,0,0)')
+      hitbox.setAttribute('stroke-width', '16')
+      hitbox.setAttribute('vector-effect', 'non-scaling-stroke')
+      hitbox.setAttribute('pointer-events', 'stroke')
+      hitbox.setAttribute('aria-hidden', 'true')
+      shape.before(hitbox)
+    })
+  })
+}
+
 function handleClick(event) {
   const target = event?.target
   if (!target || !container.value) return
@@ -65,6 +97,7 @@ function handleClick(event) {
 function bindEvents() {
   const el = container.value
   if (!el) return
+  enhanceHitboxes()
   if (!el.__muscleBound) {
     el.addEventListener('click', handleClick)
     el.__muscleBound = true
@@ -137,10 +170,25 @@ onBeforeUnmount(() => {
   stroke: #b9c2d0;
   stroke-width: 1.2;
   transition: fill 0.2s ease, stroke 0.2s ease;
+}
+
+.svg-shell :deep(.muscle-group.is-clickable .muscle) {
   cursor: pointer;
 }
 
-.svg-shell :deep(.muscle-group:hover .muscle) {
+.svg-shell :deep(.muscle-group.is-clickable) {
+  cursor: pointer;
+}
+
+.svg-shell :deep(.muscle-hitbox) {
+  fill: none !important;
+  stroke: rgba(0, 0, 0, 0);
+  stroke-width: 16;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+}
+
+.svg-shell :deep(.muscle-group.is-clickable:hover .muscle) {
   fill: rgba(239, 68, 68, 0.28) !important;
 }
 
