@@ -8,6 +8,7 @@ const Terms = () => import('@/pages/Terms.vue')
 const Disclaimer = () => import('@/pages/Disclaimer.vue')
 const Login = () => import('@/pages/auth/Login.vue')
 const Register = () => import('@/pages/auth/Register.vue')
+const OAuthCallback = () => import('@/pages/auth/OAuthCallback.vue')
 const Dashboard = () => import('@/pages/app/Dashboard.vue')
 const Plans = () => import('@/pages/app/Plans.vue')
 const Progress = () => import('@/pages/app/Progress.vue')
@@ -121,6 +122,17 @@ const routes = [
         'Create your Fitness AI Planner account to build training plans, log nutrition data, track progress, and receive grounded AI guidance.'
     }
   },
+  {
+    path: '/auth/callback',
+    name: 'oauth-callback',
+    component: OAuthCallback,
+    meta: {
+      hideShell: true,
+      publicGuestRoute: true,
+      pageTitle: 'Signing In | Fitness AI Planner',
+      pageDescription: 'Completing secure sign-in.'
+    }
+  },
   { path: '/onboarding', name: 'onboarding', component: Onboarding, meta: { requiresAuth: true, hideShell: true } }, // 登录后信息调查
   { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { requiresAuth: true } }, // 登录后主页
   { path: '/schedule', name: 'schedule', component: Schedule, meta: { requiresAuth: true } },
@@ -148,7 +160,6 @@ router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
   const isOnboardingEdit = to.name === 'onboarding' && String(to.query.edit || '') === '1'
   const isRecoveryRoute = to.name === 'login' && String(to.query.mode || '') === 'recovery'
-  const isOAuthBridgeRoute = to.name === 'login' && String(to.query.mode || '') === 'oauth'
   const isPublicInfoPage = to.meta?.publicInfoPage === true
   const shouldHydrateAuth = Boolean(to.meta.requiresAuth || to.meta.guestOnly || auth.user)
 
@@ -167,7 +178,7 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'login', query: { redirect: to.fullPath } })
   }
 
-  if (auth.isAuthed && !auth.user?.onboarding?.completed && to.name !== 'onboarding' && !isPublicInfoPage && !isOAuthBridgeRoute) {
+  if (auth.isAuthed && !auth.user?.onboarding?.completed && to.name !== 'onboarding' && !isPublicInfoPage) {
     return next({ name: 'onboarding' })
   }
 
@@ -175,7 +186,7 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'dashboard' })
   }
 
-  if (to.meta.guestOnly && auth.isAuthed && !isRecoveryRoute && !isOAuthBridgeRoute) {
+  if (to.meta.guestOnly && auth.isAuthed && !isRecoveryRoute) {
     if (auth.user?.onboarding?.completed) {
       return next({ name: 'dashboard' })
     }

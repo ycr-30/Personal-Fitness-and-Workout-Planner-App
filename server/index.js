@@ -3016,8 +3016,7 @@ app.get('/auth/google/callback', async (req, res) => {
     const redirectTarget = resolveRedirectTarget(
       typeof state === 'string' ? state : redirect
     )
-    const appCallback = new URL('/login', APP_ORIGIN)
-    appCallback.searchParams.set('mode', 'oauth')
+    const appCallback = new URL('/auth/callback', APP_ORIGIN)
     if (redirectTarget) {
       appCallback.searchParams.set('redirect', redirectTarget)
     }

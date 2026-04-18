@@ -73,9 +73,8 @@
           </transition>
 
           <button class="submit" :disabled="loading || hasInlineErrors">
-            <span v-if="!loading && !welcomeOverlay">Log in</span>
-            <span v-else-if="loading">Signing in…</span>
-            <span v-else>Loading your plan…</span>
+            <span v-if="!loading">Log in</span>
+            <span v-else>Signing in…</span>
           </button>
         </form>
 
@@ -306,19 +305,11 @@
       </section>
     </div>
 
-    <transition name="overlay">
-      <div v-if="welcomeOverlay" class="welcome-overlay">
-        <div class="welcome-card">
-          <p class="welcome-title">Welcome back, {{ displayName }}.</p>
-          <p class="welcome-subtitle">Loading your plan…</p>
-        </div>
-      </div>
-    </transition>
   </div>
 </template>
 
 <script setup>
-import { reactive, computed, watch, ref, onBeforeUnmount, onMounted } from 'vue' // 引入响应式工具
+import { reactive, computed, watch, ref, onBeforeUnmount } from 'vue' // 引入响应式工具
 import { useRouter, useRoute } from 'vue-router' // 引入路由实例
 import { useAuthStore } from '@/stores/auth' // 引入鉴权仓库
 import { AUTH_SERVER_CONFIG_ERROR, AUTH_SERVER_ORIGIN, buildAuthServerUrl } from '@/lib/authServerOrigin'
@@ -345,7 +336,6 @@ const touched = reactive({
 })
 const attempts = ref(0) // 连续失败次数
 const resetHint = ref(false) // 是否提示重置密码
-const welcomeOverlay = ref(false) // 欢迎遮罩层状态
 
 const REMEMBER_KEY = 'pf_remember_pref' // 记住登录偏好键
 const LAST_IDENTIFIER_KEY = 'pf_last_identifier' // 最近使用账号键
@@ -393,8 +383,6 @@ const hasInlineErrors = computed(() => {
   return !!inlineErrors.value.account || !!inlineErrors.value.password
 })
 
-const displayName = computed(() => auth.user?.name || 'Athlete') // 欢迎语显示名称
-
 // 社交登录跳转
 const socialError = ref('')
 const redirectPath = computed(() => {
@@ -415,135 +403,6 @@ function decodeOAuthErrorMessage(value) {
     return decodeURIComponent(normalized)
   } catch {
     return normalized
-  }
-}
-
-function readHashParams() {
-  if (typeof window === 'undefined') return new URLSearchParams()
-  const rawHash = String(window.location.hash || '').replace(/^#/, '')
-  return new URLSearchParams(rawHash)
-}
-
-async function completeSupabaseLoginFromSession(sessionUser) {
-  if (!sessionUser?.id) return false
-  welcomeOverlay.value = true
-  const syncedUser = await auth.hydrateFromSupabaseSession()
-  if (!syncedUser) {
-    welcomeOverlay.value = false
-    socialError.value = auth.error || 'Unable to complete sign-in. Please try again.'
-    return false
-  }
-  await syncLoginPreferencesToCloud(sessionUser.email || form.account)
-  await router.replace(resolvePostLoginTarget())
-  return true
-}
-
-async function clearOAuthCallbackQuery() {
-  const nextQuery = { ...route.query }
-  delete nextQuery.code
-  delete nextQuery.error
-  delete nextQuery.error_code
-  delete nextQuery.error_description
-  delete nextQuery.state
-  if (JSON.stringify(nextQuery) === JSON.stringify(route.query)) return
-  await router.replace({ name: 'login', query: nextQuery })
-}
-
-async function clearOAuthBridgeState() {
-  if (typeof window !== 'undefined' && window.location.hash) {
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
-  }
-  const nextQuery = { ...route.query }
-  delete nextQuery.mode
-  if (JSON.stringify(nextQuery) === JSON.stringify(route.query)) return
-  await router.replace({ name: 'login', query: nextQuery })
-}
-
-async function handleBackendGoogleCallback() {
-  if (!supabase || String(route.query.mode || '') !== 'oauth') return false
-
-  const hashParams = readHashParams()
-  const provider = String(hashParams.get('provider') || '').trim().toLowerCase()
-  const idToken = String(hashParams.get('google_id_token') || '').trim()
-  const accessToken = String(hashParams.get('google_access_token') || '').trim()
-
-  if (provider !== 'google' || !idToken) {
-    socialError.value = 'Google sign-in payload was missing. Please try again.'
-    await clearOAuthBridgeState()
-    return true
-  }
-
-  socialError.value = ''
-  try {
-    const { data, error } = await supabase.auth.signInWithIdToken({
-      provider: 'google',
-      token: idToken,
-      access_token: accessToken || undefined
-    })
-    if (error) throw error
-
-    const sessionUser = data?.session?.user || data?.user || null
-    if (!sessionUser?.id) {
-      socialError.value = 'Google sign-in finished, but no cloud session was created. Please try again.'
-      await clearOAuthBridgeState()
-      return true
-    }
-
-    const completed = await completeSupabaseLoginFromSession(sessionUser)
-    if (!completed) {
-      await clearOAuthBridgeState()
-      return true
-    }
-    return true
-  } catch (error) {
-    console.error('Backend Google OAuth callback handling failed', error)
-    socialError.value = error?.message || 'Google sign-in failed. Please try again.'
-    await clearOAuthBridgeState()
-    return true
-  }
-}
-
-async function handleGoogleOAuthCallback() {
-  if (!supabase || String(route.query.mode || '') === 'recovery') return
-
-  const oauthError =
-    typeof route.query.error_description === 'string'
-      ? route.query.error_description
-      : typeof route.query.error === 'string'
-        ? route.query.error
-        : ''
-  if (oauthError) {
-    socialError.value = decodeOAuthErrorMessage(oauthError)
-    await clearOAuthCallbackQuery()
-    return
-  }
-
-  const authCode = typeof route.query.code === 'string' ? route.query.code.trim() : ''
-  if (!authCode) return
-
-  socialError.value = ''
-  try {
-    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(authCode)
-    if (exchangeError) throw exchangeError
-
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-    if (sessionError) throw sessionError
-
-    const sessionUser = sessionData?.session?.user || null
-    if (!sessionUser?.id) {
-      socialError.value = 'Google sign-in finished, but no cloud session was created. Please try again.'
-      await clearOAuthCallbackQuery()
-      return
-    }
-
-    const completed = await completeSupabaseLoginFromSession(sessionUser)
-    if (!completed) {
-      await clearOAuthCallbackQuery()
-    }
-  } catch (error) {
-    console.error('Google OAuth callback handling failed', error)
-    socialError.value = error?.message || 'Google sign-in failed. Please try again.'
-    await clearOAuthCallbackQuery()
   }
 }
 
@@ -868,18 +727,17 @@ watch(
   { immediate: true }
 )
 
-onMounted(() => {
-  ;(async () => {
-    try {
-      const handledByBackendBridge = await handleBackendGoogleCallback()
-      if (handledByBackendBridge) return
-      await handleGoogleOAuthCallback()
-    } catch (error) {
-      console.error('Google OAuth bootstrap failed', error)
-      socialError.value = 'Google sign-in failed. Please try again.'
-    }
-  })()
-})
+watch(
+  () => route.query.oauth_error,
+  async (message) => {
+    if (typeof message !== 'string' || !message.trim()) return
+    socialError.value = decodeOAuthErrorMessage(message)
+    const nextQuery = { ...route.query }
+    delete nextQuery.oauth_error
+    await router.replace({ name: 'login', query: nextQuery })
+  },
+  { immediate: true }
+)
 
 async function confirmOtp() {
   otp.touched = true
@@ -1473,36 +1331,6 @@ async function onSubmit() {
   color: #3a3a3c;
   font-size: 14px;
   line-height: 1.6;
-}
-
-.welcome-overlay {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(3px);
-  z-index: 60;
-}
-
-.welcome-card {
-  padding: 32px 36px;
-  background: rgba(255, 255, 255, 0.92);
-  border-radius: 28px;
-  box-shadow: 0 30px 60px rgba(17, 17, 17, 0.2);
-  text-align: center;
-}
-
-.welcome-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.welcome-subtitle {
-  margin: 6px 0 0;
-  font-size: 15px;
-  color: #6e6e73;
 }
 
 .fade-enter-active,
