@@ -1615,6 +1615,10 @@ const completedLogsInRange = computed(() =>
   logsInRange.value.filter((item) => item.status === 'completed')
 )
 
+const completedLogsToday = computed(() =>
+  completedLogsInRange.value.filter((item) => item.date === todayIso.value)
+)
+
 const completedLogsDetailedInRange = computed(() =>
   completedLogsInRange.value
     .map((item) => {
@@ -1640,6 +1644,9 @@ const completionRate = computed(() => {
 
 const totalMinutes = computed(() =>
   completedLogsInRange.value.reduce((sum, item) => sum + parseDurationMinutes(item), 0)
+)
+const todayMinutes = computed(() =>
+  completedLogsToday.value.reduce((sum, item) => sum + parseDurationMinutes(item), 0)
 )
 const avgDailyMinutes = computed(() => Math.round(totalMinutes.value / rangeDays.value))
 const averageDailyMinutesLabel = computed(() =>
@@ -3243,10 +3250,10 @@ const totalStrengthSets = computed(() =>
 const weekFactor = computed(() => Math.max(1, rangeDays.value / 7))
 
 function challengeActualValue(id) {
-  if (id === 'activity') return Math.round(totalMinutes.value * CALORIES_PER_MINUTE / rangeDays.value)
-  if (id === 'burn') return Math.round(totalMinutes.value * CALORIES_PER_MINUTE / rangeDays.value)
-  if (id === 'fatBurn') return Math.round(totalMinutes.value * CALORIES_PER_MINUTE * 0.6 / rangeDays.value)
-  if (id === 'duration') return Math.round(totalMinutes.value / rangeDays.value)
+  if (id === 'activity') return Math.round(todayMinutes.value * CALORIES_PER_MINUTE)
+  if (id === 'burn') return Math.round(todayMinutes.value * CALORIES_PER_MINUTE)
+  if (id === 'fatBurn') return Math.round(todayMinutes.value * CALORIES_PER_MINUTE * 0.6)
+  if (id === 'duration') return Math.round(todayMinutes.value)
   if (id === 'runDistance') return Number((distanceSummary.value.run / weekFactor.value).toFixed(1))
   if (id === 'walkDistance') return Number((distanceSummary.value.walk / weekFactor.value).toFixed(1))
   if (id === 'rideDistance') return Number((distanceSummary.value.ride / weekFactor.value).toFixed(1))

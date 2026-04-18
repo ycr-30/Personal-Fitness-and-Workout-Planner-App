@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
+import { getUserStorageKey } from '@/lib/userStorage'
 
 const profile = ref({
   firstName: '',
@@ -52,7 +53,50 @@ function normalizeNumericField(value) {
   return Number.isFinite(parsed) ? parsed : ''
 }
 
-function normalizeUserProfile(source = {}, authUser = null) {
+function pickMetricValue(...values) {
+  for (const value of values) {
+    const parsed = normalizeNumericField(value)
+    if (parsed !== '' && parsed > 0) return parsed
+  }
+  return ''
+}
+
+function readPlanFallback(authUser = null) {
+  if (typeof window === 'undefined' || !authUser) return null
+
+  try {
+    const raw = window.localStorage.getItem(getUserStorageKey('pf_plan_state', authUser))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const weightRecords = Array.isArray(parsed?.weightRecords) ? parsed.weightRecords : []
+    const weightCandidates = weightRecords
+      .map((item) => normalizeNumericField(item?.weight))
+      .filter((value) => value !== '' && value > 0)
+    const latestWeight = weightCandidates.length ? weightCandidates[weightCandidates.length - 1] : ''
+
+    return {
+      birthday: parsed?.bodyMetrics?.birthday || '',
+      height: parsed?.bodyMetrics?.heightCm ?? '',
+      weight: latestWeight ?? parsed?.weight?.current ?? ''
+    }
+  } catch {
+    return null
+  }
+}
+
+function hasProfileSnapshot(value = {}) {
+  return Boolean(
+    value?.firstName ||
+      value?.lastName ||
+      value?.displayName ||
+      value?.birthday ||
+      value?.avatar ||
+      value?.height !== '' ||
+      value?.weight !== ''
+  )
+}
+
+function normalizeUserProfile(source = {}, authUser = null, fallbackSource = null) {
   const authNameParts = splitNameParts(authUser?.name || '')
   const displayName =
     String(source.display_name || source.displayName || authUser?.name || '')
@@ -70,9 +114,25 @@ function normalizeUserProfile(source = {}, authUser = null) {
     displayName: displayName || `${firstName} ${lastName}`.trim(),
     avatar: String(source.avatar_url ?? source.avatar ?? authUser?.avatar ?? '').trim(),
     sex: String(source.sex || authUser?.sex || 'female').toLowerCase() === 'male' ? 'male' : 'female',
-    birthday: normalizeBirthday(source.birthday ?? authUser?.birthday),
-    height: normalizeNumericField(source.height_cm ?? source.height ?? authUser?.heightCm ?? authUser?.height),
-    weight: normalizeNumericField(source.weight_kg ?? source.weight ?? authUser?.weightKg ?? authUser?.weight),
+    birthday: normalizeBirthday(source.birthday ?? authUser?.birthday ?? fallbackSource?.birthday),
+    height: pickMetricValue(
+      source.height_cm,
+      source.height,
+      authUser?.heightCm,
+      authUser?.height_cm,
+      authUser?.height,
+      fallbackSource?.height_cm,
+      fallbackSource?.height
+    ),
+    weight: pickMetricValue(
+      source.weight_kg,
+      source.weight,
+      authUser?.weightKg,
+      authUser?.weight_kg,
+      authUser?.weight,
+      fallbackSource?.weight_kg,
+      fallbackSource?.weight
+    ),
     updatedAt: source.updated_at || source.updatedAt || null
   }
 }
@@ -176,12 +236,14 @@ export function useUserProfile() {
     loading.value = true
     error.value = ''
     let supabaseUser = null
+    const planFallback = readPlanFallback(auth.user)
 
     try {
       supabaseUser = await getSupabaseUser()
       if (!supabaseUser?.id) {
-        const fallback = normalizeUserProfile({}, auth.user)
+        const fallback = normalizeUserProfile({}, auth.user, planFallback)
         profile.value = fallback
+        syncAuthSnapshot(auth, fallback)
         syncMeta.value = {
           connected: false,
           source: 'local',
@@ -192,7 +254,7 @@ export function useUserProfile() {
       }
 
       const row = await readUserProfileRow(supabaseUser)
-      const normalized = normalizeUserProfile(row || {}, auth.user)
+      const normalized = normalizeUserProfile(row || {}, auth.user, planFallback)
       profile.value = normalized
       syncAuthSnapshot(auth, normalized, supabaseUser)
       syncMeta.value = {
@@ -203,9 +265,12 @@ export function useUserProfile() {
       }
       return normalized
     } catch (err) {
-      error.value = buildProfileErrorMessage(err, 'load')
-      const fallback = normalizeUserProfile({}, auth.user)
+      const fallback = normalizeUserProfile({}, auth.user, planFallback)
+      error.value = hasProfileSnapshot(fallback) ? '' : buildProfileErrorMessage(err, 'load')
       profile.value = fallback
+      if (hasProfileSnapshot(fallback)) {
+        syncAuthSnapshot(auth, fallback, supabaseUser)
+      }
       syncMeta.value = {
         connected: Boolean(supabaseUser?.id),
         source: supabaseUser?.id ? 'cloud-error' : 'local',

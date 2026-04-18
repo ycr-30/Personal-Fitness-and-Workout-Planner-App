@@ -191,6 +191,57 @@ export function useFoodSearch() {
     return sortAndDeduplicateRows([...(foodResponse.data || []), ...(brandResponse.data || [])])
   }
 
+  async function searchAllFoods(normalized) {
+    if (!normalized) {
+      return {
+        results: [],
+        hint: 'Type a food name to search all foods.'
+      }
+    }
+
+    const prefixResults = await directPrefixSearch(normalized)
+
+    if (normalized.length === 1) {
+      return {
+        results: prefixResults,
+        hint: prefixResults.length
+          ? `Showing foods that start with "${normalized.toUpperCase()}".`
+          : `No foods found starting with "${normalized.toUpperCase()}".`
+      }
+    }
+
+    if (prefixResults.length && normalized.length <= 2) {
+      return {
+        results: prefixResults,
+        hint: `Showing foods that start with "${normalized}".`
+      }
+    }
+
+    if (prefixResults.length >= 8) {
+      return {
+        results: prefixResults,
+        hint: `Showing the best prefix matches for "${normalized}".`
+      }
+    }
+
+    const { data, error: requestError } = await supabase.rpc('search_nutrition_foods_clean', {
+      search_text: normalized,
+      filter_mode: 'all',
+      limit_n: 20
+    })
+
+    if (requestError) throw requestError
+    const rpcResults = Array.isArray(data) ? data.map((row) => mapSearchResultRow(row)) : []
+    return {
+      results: rpcResults.length ? rpcResults : prefixResults,
+      hint: rpcResults.length
+        ? ''
+        : prefixResults.length
+          ? `Showing foods that start with "${normalized}" because no broader matches were returned.`
+          : ''
+    }
+  }
+
   async function searchFoods(term = query.value) {
     if (!supabase) {
       error.value = 'Supabase is not configured.'
@@ -206,53 +257,27 @@ export function useFoodSearch() {
       if (filterMode.value === 'recent') {
         loading.value = true
         await loadRecentFoods()
-        results.value = filterRecentRows(normalized)
-        return
-      }
+        const recentMatches = filterRecentRows(normalized)
+        if (!normalized || recentMatches.length) {
+          results.value = recentMatches
+          hint.value = normalized && recentMatches.length
+            ? `Showing recent foods that match "${normalized}".`
+            : ''
+          return
+        }
 
-      if (!normalized) {
-        results.value = []
-        hint.value = 'Type a food name to search all foods.'
+        const fallback = await searchAllFoods(normalized)
+        results.value = fallback.results
+        hint.value = fallback.results.length
+          ? `No recent matches for "${normalized}". Showing all foods instead.`
+          : `No recent matches for "${normalized}", and no foods were found in the full catalog.`
         return
       }
 
       loading.value = true
-      const prefixResults = await directPrefixSearch(normalized)
-
-      if (normalized.length === 1) {
-        results.value = prefixResults
-        hint.value = results.value.length
-          ? `Showing foods that start with "${normalized.toUpperCase()}".`
-          : `No foods found starting with "${normalized.toUpperCase()}".`
-        return
-      }
-
-      if (prefixResults.length && normalized.length <= 2) {
-        results.value = prefixResults
-        hint.value = `Showing foods that start with "${normalized}".`
-        return
-      }
-
-      if (prefixResults.length >= 8) {
-        results.value = prefixResults
-        hint.value = `Showing the best prefix matches for "${normalized}".`
-        return
-      }
-
-      const { data, error: requestError } = await supabase.rpc('search_nutrition_foods_clean', {
-        search_text: normalized,
-        filter_mode: 'all',
-        limit_n: 20
-      })
-
-      if (requestError) throw requestError
-      const rpcResults = Array.isArray(data) ? data.map((row) => mapSearchResultRow(row)) : []
-      results.value = rpcResults.length ? rpcResults : prefixResults
-      hint.value = rpcResults.length
-        ? ''
-        : prefixResults.length
-          ? `Showing foods that start with "${normalized}" because no broader matches were returned.`
-          : ''
+      const searchResult = await searchAllFoods(normalized)
+      results.value = searchResult.results
+      hint.value = searchResult.hint
     } catch (err) {
       const rawMessage = formatSupabaseError(err, 'Unable to load foods.')
       if (rawMessage.includes('statement timeout')) {
@@ -291,7 +316,7 @@ export function useFoodSearch() {
     async (nextMode) => {
       if (timer) clearTimeout(timer)
       if (nextMode === 'recent') {
-        searchFoods('')
+        searchFoods(query.value)
         return
       }
       timer = setTimeout(() => {

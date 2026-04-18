@@ -110,7 +110,15 @@
           </div>
           <div class="field">
             <label>Date of Birth</label>
-            <input v-model="form.birthday" type="date" :disabled="!isEditingBody" />
+            <input
+              :value="form.birthday"
+              type="text"
+              inputmode="numeric"
+              placeholder="YYYY-MM-DD"
+              :disabled="!isEditingBody"
+              @input="onBirthdayInput"
+              @blur="normalizeBirthdayInput"
+            />
           </div>
           <div class="field">
             <label>Height (cm)</label>
@@ -225,6 +233,34 @@ function normalizeNumberValue(value) {
   return Number.isFinite(parsed) ? parsed : ''
 }
 
+function resolveMetricValue(...values) {
+  for (const value of values) {
+    const parsed = normalizeNumberValue(value)
+    if (parsed !== '' && parsed > 0) return parsed
+  }
+  return ''
+}
+
+function formatBirthdayDraft(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 8)
+  if (!digits) return ''
+  if (digits.length <= 4) return digits
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`
+}
+
+function onBirthdayInput(event) {
+  const nextValue = normalizeBirthdayValue(event?.target?.value) || formatBirthdayDraft(event?.target?.value)
+  form.birthday = nextValue
+  if (event?.target && event.target.value !== nextValue) {
+    event.target.value = nextValue
+  }
+}
+
+function normalizeBirthdayInput() {
+  form.birthday = normalizeBirthdayValue(form.birthday) || formatBirthdayDraft(form.birthday)
+}
+
 function resetFeedback() {
   savedMessage.value = ''
   savedTone.value = 'success'
@@ -232,29 +268,22 @@ function resetFeedback() {
 }
 
 const setFormFromSource = (source = {}) => {
-  const name = source?.displayName || source?.name || ''
+  const name = source?.displayName || source?.display_name || source?.name || ''
   const parts = name.trim().split(' ')
-  form.firstName = source?.firstName ?? parts[0] ?? ''
-  form.lastName = source?.lastName ?? parts.slice(1).join(' ')
+  form.firstName = source?.firstName ?? source?.first_name ?? parts[0] ?? ''
+  form.lastName = source?.lastName ?? source?.last_name ?? parts.slice(1).join(' ')
   form.sex = source?.sex || 'female'
   form.birthday = normalizeBirthdayValue(source?.birthday)
-  form.height = normalizeNumberValue(source?.height)
-  form.weight = normalizeNumberValue(source?.weight)
-  form.avatar = source?.avatar || ''
+  form.height = resolveMetricValue(source?.height, source?.heightCm, source?.height_cm)
+  form.weight = resolveMetricValue(source?.weight, source?.weightKg, source?.weight_kg)
+  form.avatar = source?.avatar || source?.avatar_url || ''
 }
 
 watch(
   () => auth.user,
   (user) => {
     if (!user || isEditingPersonal.value || isEditingBody.value) return
-    setFormFromSource({
-      name: user.name,
-      sex: user.sex,
-      birthday: user.birthday,
-      height: user.heightCm || user.height || '',
-      weight: user.weightKg || user.weight || '',
-      avatar: user.avatar
-    })
+    setFormFromSource(user)
   },
   { immediate: true }
 )

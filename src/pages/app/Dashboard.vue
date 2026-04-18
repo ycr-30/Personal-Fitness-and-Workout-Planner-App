@@ -117,7 +117,7 @@
             </div>
           </div>
         </div>
-        <p class="chart-status">{{ weightStatusLine }}</p>
+        <p v-if="weightVisibleLogCount > 0" class="chart-status">{{ weightStatusLine }}</p>
         <div class="chart-area">
           <template v-if="weightVisibleLogCount > 0">
             <div class="chart-grid">
@@ -151,11 +151,17 @@
             </div>
           </template>
           <div v-else class="chart-empty-state">
-            <strong>No weight logs in this range.</strong>
-            <p>Change the time range or add a new weigh-in to render the trend line.</p>
+            <strong>{{ hasWeightData ? 'No weight logs in this range.' : 'No weight logs yet.' }}</strong>
+            <p>
+              {{
+                hasWeightData
+                  ? 'Change the time range or add a new weigh-in to render the trend line.'
+                  : 'Add your first weigh-in to render the trend line.'
+              }}
+            </p>
           </div>
         </div>
-        <div class="chart-summary">
+        <div v-if="weightVisibleLogCount > 0" class="chart-summary">
           <span>{{ weightVisibleRangeLabel }}</span>
           <span>{{ weightSummaryHint }}</span>
         </div>

@@ -12,9 +12,9 @@
 
     <div v-if="baseError" class="error-banner">{{ baseError }}</div>
 
-    <div class="stage-layout" :class="{ 'is-detail': isDetailStage }">
+    <div class="stage-layout">
       <section class="stage-main">
-        <div v-if="!isDetailStage" class="map-stage">
+        <div class="map-stage">
           <div class="map-hero">
             <FrontBackMap
               :front-svg="frontSvg"
@@ -25,13 +25,19 @@
               @select="handleSelect"
             />
           </div>
-          <div class="map-hint">
-            <span>Step 1</span>
-            <p>Select a muscle group on the map, then choose equipment on the right.</p>
+          <div class="map-hint" :class="{ active: isDetailStage }">
+            <span>{{ isDetailStage ? 'Selected' : 'Step 1' }}</span>
+            <p v-if="isDetailStage">
+              Filtering by {{ selectedMuscleLabel }}. Tap another muscle on the map or clear the current selection.
+            </p>
+            <p v-else>Select a muscle group on the map, then choose equipment on the right.</p>
+            <button v-if="isDetailStage" class="inline-link" type="button" @click="clearSelection">
+              Clear selection
+            </button>
           </div>
         </div>
 
-        <div v-else class="detail-stage">
+        <div v-if="isDetailStage" class="detail-stage">
           <div class="demo-panel">
             <div class="demo-header">
               <div>
@@ -39,6 +45,9 @@
                 <p v-if="selectedMuscleLabel">Selected: {{ selectedMuscleLabel }}</p>
                 <p v-else>Select a muscle group to begin.</p>
               </div>
+              <button class="btn ghost small" type="button" @click="clearSelection">
+                Choose another muscle
+              </button>
             </div>
 
             <div v-if="!selectedSlug" class="demo-empty">
@@ -115,18 +124,6 @@
       <aside class="stage-sidebar">
         <div class="sidebar-card">
           <GenderToggle v-model="gender" :disabled="loadingBase" />
-        </div>
-
-        <div v-if="isDetailStage" class="sidebar-card compact-map">
-          <FrontBackMap
-            :front-svg="frontSvg"
-            :back-svg="backSvg"
-            :selected-slug="selectedSlug"
-            :loading="loadingBase"
-            :compact="true"
-            :show-labels="false"
-            @select="handleSelect"
-          />
         </div>
 
         <div class="sidebar-card equipment-card">
@@ -289,8 +286,28 @@ const featuredView = computed(() =>
 )
 
 function handleSelect(slug) {
-  selectedSlug.value = normalizeSlug(slug)
+  const nextSlug = normalizeSlug(slug)
+  if (!nextSlug) return
+  if (selectedSlug.value === nextSlug) {
+    clearSelection()
+    return
+  }
+  selectedSlug.value = nextSlug
   selectedMuscleData.value = resolveMuscleBySlug(selectedSlug.value)
+}
+
+function clearSelection() {
+  selectedSlug.value = ''
+  selectedMuscleData.value = null
+  selectedEquipments.value = []
+  exercises.value = []
+  exercisesError.value = ''
+  loadingExercises.value = false
+  pendingFetch.value = false
+  if (fetchTimer) {
+    clearTimeout(fetchTimer)
+    fetchTimer = null
+  }
 }
 
 function scheduleExerciseFetch() {
@@ -479,10 +496,6 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 
-.stage-layout.is-detail {
-  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 360px);
-}
-
 .stage-main {
   display: grid;
   gap: 16px;
@@ -520,12 +533,31 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
+.map-hint.active {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
 .map-hint span {
   background: var(--accent);
   color: #fff;
   padding: 4px 10px;
   border-radius: 999px;
   font-weight: 600;
+}
+
+.map-hint p {
+  margin: 0;
+  flex: 1;
+}
+
+.inline-link {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .detail-stage {
@@ -680,10 +712,6 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-soft);
   display: grid;
   gap: 12px;
-}
-
-.sidebar-card.compact-map {
-  padding: 10px;
 }
 
 .equipment-card :deep(.equipment-filter) {

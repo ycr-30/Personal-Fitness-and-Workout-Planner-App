@@ -21,6 +21,7 @@
 
     <div v-if="loading" class="state">Searching foods...</div>
     <div v-else-if="error" class="state error">{{ error }}</div>
+    <p v-else-if="hint" class="hint">{{ hint }}</p>
     <div v-else-if="!results.length" class="state">
       {{ filterMode === 'recent' ? 'No foods added in the last 7 days yet.' : 'No foods found. Switch to Custom Food to add your own entry.' }}
     </div>
@@ -107,6 +108,16 @@ defineEmits(['select', 'update:filterMode'])
 
 .state.error {
   color: #b91c1c;
+}
+
+.hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .result-row {
