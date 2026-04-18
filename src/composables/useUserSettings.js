@@ -42,6 +42,11 @@ function emitSettingsUpdated(detail = {}) {
 async function getSupabaseUser() {
   if (!supabase) return null
   try {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw sessionError
+    const sessionUser = sessionData?.session?.user || null
+    if (sessionUser?.id) return sessionUser
+
     const { data, error: requestError } = await supabase.auth.getUser()
     if (requestError) throw requestError
     return data.user || null

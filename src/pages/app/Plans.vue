@@ -11,7 +11,7 @@
         <button class="activity-pill" type="button" @click="openGoalModal(1)">
           <div class="activity-text">
             <span>Daily Activity Burn</span>
-            <strong>{{ activityCalories }} / {{ planState.challengeValues.activity }} kcal</strong>
+            <strong>{{ activityBurnSummary }}</strong>
             <em>{{ activityMinutes }} min · Today</em>
           </div>
           <div class="activity-ring" :style="{ '--progress': activityProgress }"></div>
@@ -1354,6 +1354,13 @@ const activityProgress = computed(() => {
   return Math.min(activityCalories.value / target, 1)
 })
 
+const activityBurnSummary = computed(() => {
+  const goal = Number(planState.challengeValues.activity) || 0
+  const actual = Number(activityCalories.value) || 0
+  if (!goal) return `Actual ${actual} kcal`
+  return `Goal ${goal} kcal · Actual ${actual} kcal`
+})
+
 const activeCircumferenceLabel = computed(() => {
   const part = circumferenceParts.find((item) => item.id === planState.circumference.part)
   return part?.label || 'Unknown'
@@ -2326,6 +2333,7 @@ function calcActivity() {
   workouts.forEach((workout) => {
     const workoutDate = parseISODate(workout.date)
     if (!workoutDate) return
+    const isCompleted = String(workout.status || '').toLowerCase() === 'completed'
 
     const minutesFromExercises = Array.isArray(workout.exercises)
       ? workout.exercises.reduce((acc, exercise) => {
@@ -2340,12 +2348,12 @@ function calcActivity() {
       ? workout.exercises.reduce((acc, exercise) => acc + (Number(exercise.sets) || 0), 0)
       : 0
 
-    if (workout.date === today) {
+    if (isCompleted && workout.date === today) {
       totalMinutesToday += minutes
       totalWorkoutMinutesToday += minutes
     }
 
-    if (workoutDate >= weekStart) {
+    if (isCompleted && workoutDate >= weekStart) {
       totalWeeklyMinutes += minutes
       totalWeeklySets += sets
       totalWeeklyWorkouts += 1

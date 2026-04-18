@@ -4,7 +4,7 @@
       <div class="header-copy">
         <h1>Settings</h1>
         <p>Manage how Keep Fit behaves across your devices.</p>
-        <p v-if="statusMessage" class="status-note" :class="statusTone">{{ statusMessage }}</p>
+        <p v-if="showStatusNote" class="status-note" :class="statusTone">{{ statusMessage }}</p>
       </div>
     </header>
 
@@ -536,12 +536,13 @@ const lastSyncedLabel = computed(() => {
     timeStyle: 'short'
   }).format(date)}`
 })
+const showStatusNote = computed(() => Boolean(statusMessage.value) && statusTone.value !== 'neutral')
 
 async function persistSettings() {
   try {
     const result = await saveUserSettings(form)
     if (result?.cloudSaved === false) {
-      statusMessage.value = 'Applied on this device. Sign in with Supabase to sync settings to cloud storage.'
+      statusMessage.value = ''
       statusTone.value = 'neutral'
     } else {
       statusMessage.value = 'Saved successfully.'
@@ -643,6 +644,14 @@ async function loadAccountInfo() {
   accountInfoLoading.value = true
   accountInfoError.value = ''
   try {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw sessionError
+    const sessionUser = sessionData?.session?.user || null
+    if (sessionUser?.id) {
+      currentSupabaseUser.value = sessionUser
+      return
+    }
+
     const { data, error: requestError } = await supabase.auth.getUser()
     if (requestError) throw requestError
     currentSupabaseUser.value = data.user || null

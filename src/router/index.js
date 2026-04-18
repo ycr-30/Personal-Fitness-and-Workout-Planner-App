@@ -148,6 +148,7 @@ router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
   const isOnboardingEdit = to.name === 'onboarding' && String(to.query.edit || '') === '1'
   const isRecoveryRoute = to.name === 'login' && String(to.query.mode || '') === 'recovery'
+  const isOAuthBridgeRoute = to.name === 'login' && String(to.query.mode || '') === 'oauth'
   const isPublicInfoPage = to.meta?.publicInfoPage === true
   const shouldHydrateAuth = Boolean(to.meta.requiresAuth || to.meta.guestOnly || auth.user)
 
@@ -158,11 +159,15 @@ router.beforeEach(async (to, from, next) => {
     })
   }
 
+  if (!auth.isAuthed && shouldHydrateAuth && !isRecoveryRoute) {
+    await auth.hydrateFromSupabaseSession()
+  }
+
   if (to.meta.requiresAuth && !auth.isAuthed) {
     return next({ name: 'login', query: { redirect: to.fullPath } })
   }
 
-  if (auth.isAuthed && !auth.user?.onboarding?.completed && to.name !== 'onboarding' && !isPublicInfoPage) {
+  if (auth.isAuthed && !auth.user?.onboarding?.completed && to.name !== 'onboarding' && !isPublicInfoPage && !isOAuthBridgeRoute) {
     return next({ name: 'onboarding' })
   }
 
@@ -170,7 +175,7 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'dashboard' })
   }
 
-  if (to.meta.guestOnly && auth.isAuthed && !isRecoveryRoute) {
+  if (to.meta.guestOnly && auth.isAuthed && !isRecoveryRoute && !isOAuthBridgeRoute) {
     if (auth.user?.onboarding?.completed) {
       return next({ name: 'dashboard' })
     }

@@ -233,9 +233,15 @@ function normalizeNumberValue(value) {
   return Number.isFinite(parsed) ? parsed : ''
 }
 
+function normalizeMetricValue(value, digits = 1) {
+  const parsed = normalizeNumberValue(value)
+  if (parsed === '') return ''
+  return Number(parsed.toFixed(digits))
+}
+
 function resolveMetricValue(...values) {
   for (const value of values) {
-    const parsed = normalizeNumberValue(value)
+    const parsed = normalizeMetricValue(value)
     if (parsed !== '' && parsed > 0) return parsed
   }
   return ''

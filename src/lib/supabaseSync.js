@@ -298,13 +298,6 @@ export async function syncLocalDataToSupabase(options = {}) {
   if (sessionError) throw sessionError
 
   if (!sessionData.session) {
-    if (interactive) {
-      await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: window.location.href }
-      })
-      return { status: 'redirect' }
-    }
     return { status: 'no-session' }
   }
 

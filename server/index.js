@@ -3006,36 +3006,32 @@ app.get('/auth/google/callback', async (req, res) => {
     }
 
     const tokenJson = await tokenRes.json()
-    const { id_token: idToken } = tokenJson
+    const { id_token: idToken, access_token: accessToken } = tokenJson
     if (!idToken) return res.status(401).send('Missing id_token from Google')
 
-    const ticket = await googleClient.verifyIdToken({
+    await googleClient.verifyIdToken({
       idToken,
       audience: GOOGLE_CLIENT_ID
     })
-    const payload = ticket.getPayload()
-    const { user, created } = await findOrCreateUser({
-      provider: 'google',
-      providerId: payload.sub,
-      email: payload.email,
-      name: payload.name || payload.email,
-      avatar: payload.picture
-    })
-    const sessionUser = { ...user, sub: `google:${payload.sub}` }
-
-    const session = issueSession(sessionUser)
-    setSessionCookie(res, session)
     const redirectTarget = resolveRedirectTarget(
       typeof state === 'string' ? state : redirect
     )
-    const registerTarget = `${APP_ORIGIN}/register?prefill=google&name=${encodeURIComponent(payload.name || '')}&email=${encodeURIComponent(payload.email || '')}`
-    const needsOnboarding = !user.onboardingCompleted
-    const target = created
-      ? registerTarget
-      : needsOnboarding
-        ? `${APP_ORIGIN}/onboarding`
-        : redirectTarget || `${APP_ORIGIN}/dashboard`
-    res.redirect(target)
+    const appCallback = new URL('/login', APP_ORIGIN)
+    appCallback.searchParams.set('mode', 'oauth')
+    if (redirectTarget) {
+      appCallback.searchParams.set('redirect', redirectTarget)
+    }
+
+    const hashParams = new URLSearchParams({
+      provider: 'google',
+      google_id_token: idToken
+    })
+    if (accessToken) {
+      hashParams.set('google_access_token', accessToken)
+    }
+    appCallback.hash = hashParams.toString()
+
+    res.redirect(appCallback.toString())
   } catch (err) {
     console.error('Google callback error', {
       message: err?.message,
