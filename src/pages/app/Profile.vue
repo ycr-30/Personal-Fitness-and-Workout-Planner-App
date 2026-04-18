@@ -111,6 +111,9 @@
           <div class="field">
             <label>Date of Birth</label>
             <input v-model="form.birthday" type="date" :disabled="!isEditingBody" />
+            <p v-if="bodyFatNeedsBirthday" class="field-note">
+              Add your date of birth to unlock automatic body fat estimation.
+            </p>
           </div>
           <div class="field">
             <label>Height (cm)</label>
@@ -123,6 +126,15 @@
           <div class="field readonly">
             <label>Estimated body fat (%)</label>
             <input :value="bodyFatDisplay" type="text" readonly />
+            <p class="field-note">
+              Calculated automatically from height, weight, date of birth, and sex using the Deurenberg equation.
+            </p>
+            <p v-if="bodyFatMissingHint" class="field-note">
+              {{ bodyFatMissingHint }}
+            </p>
+            <p v-else-if="bodyFatWarning" class="field-note warning">
+              {{ bodyFatWarning }}
+            </p>
           </div>
         </div>
       </section>
@@ -278,15 +290,25 @@ const avatarStyle = computed(() =>
     : {}
 )
 
-const bodyFat = computed(() => {
-  if (!form.height || !form.weight || !form.birthday) return null
-  const birthDate = new Date(form.birthday)
+function getAgeFromBirthday(value) {
+  const birthDate = new Date(value)
   if (Number.isNaN(birthDate.getTime())) return null
   const today = new Date()
   let age = today.getFullYear() - birthDate.getFullYear()
   const monthDiff = today.getMonth() - birthDate.getMonth()
   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) age -= 1
-  if (age < 0) return null
+  return age >= 0 ? age : null
+}
+
+function formatMissingFields(fields = []) {
+  if (fields.length <= 1) return fields[0] || ''
+  if (fields.length === 2) return `${fields[0]} and ${fields[1]}`
+  return `${fields.slice(0, -1).join(', ')}, and ${fields[fields.length - 1]}`
+}
+
+const bodyFat = computed(() => {
+  const age = getAgeFromBirthday(form.birthday)
+  if (!form.height || !form.weight || !age) return null
   const heightMeter = Number(form.height) / 100
   if (!heightMeter) return null
   const bmi = Number(form.weight) / (heightMeter * heightMeter)
@@ -298,6 +320,24 @@ const bodyFat = computed(() => {
 })
 
 const bodyFatDisplay = computed(() => (bodyFat.value != null ? `${bodyFat.value}` : '--'))
+const bodyFatNeedsBirthday = computed(() => !form.birthday && (form.height || form.weight))
+const hasStartedBodyFatInputs = computed(() => Boolean(form.height || form.weight || form.birthday))
+const bodyFatMissingHint = computed(() => {
+  if (!hasStartedBodyFatInputs.value) return ''
+  const missing = []
+  if (!form.height) missing.push('height')
+  if (!form.weight) missing.push('weight')
+  if (!form.birthday) missing.push('date of birth')
+  if (!missing.length) return ''
+  return `Add ${formatMissingFields(missing)} to calculate this estimate.`
+})
+const bodyFatWarning = computed(() => {
+  if (bodyFat.value == null) return ''
+  if (bodyFat.value < 3 || bodyFat.value > 60) {
+    return 'This value looks unusual. Please double-check the numbers.'
+  }
+  return ''
+})
 
 function onAvatarChange(event) {
   const [file] = event.target.files || []
@@ -682,6 +722,17 @@ onMounted(() => {
 .field {
   display: grid;
   gap: 8px;
+}
+
+.field-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.field-note.warning {
+  color: #b45309;
 }
 
 label {
