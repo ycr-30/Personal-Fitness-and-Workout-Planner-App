@@ -28,6 +28,7 @@ EN_SECTION_RE = re.compile(
     r"Target calories and protein|Meal plan|Weekly adjustment rule|Snack guardrails)\b",
     re.I,
 )
+DIRTY_TEMPLATE_RE = re.compile(r"\b(?:WORKOUT ADVICE|NUTRITION ADVICE)\b", re.I)
 DURATION_WEEK_RE = re.compile(
     r"\b(?:7\s*day|7-day|weekly|week)\b|(?:一周|七天|7天|本周)",
     re.I,
@@ -35,6 +36,8 @@ DURATION_WEEK_RE = re.compile(
 ONE_DAY_RE = re.compile(r"\b(?:1[- ]day|one day)\b|(?:一天|1天)", re.I)
 ZH_DAY_RE = re.compile(r"(?:周一|周二|周三|周四|周五|周六|周日|星期一|星期二|星期三|星期四|星期五|星期六|星期日)")
 EN_DAY_RE = re.compile(r"\b(?:day\s*[1-7]|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
+ZH_SECTION_TITLES = ("目标热量与蛋白", "饮食计划", "每周调整规则", "加餐与零食原则")
+EN_SECTION_TITLES = ("Target calories and protein", "Meal plan", "Weekly adjustment rule", "Snack guardrails")
 
 
 def _contains_cjk(text: str) -> bool:
@@ -61,10 +64,17 @@ def _is_weekly_request(text: str) -> bool:
     return bool(DURATION_WEEK_RE.search(text or ""))
 
 
+def _has_expected_sections(text: str, is_cjk: bool) -> bool:
+    body = str(text or "")
+    titles = ZH_SECTION_TITLES if is_cjk else EN_SECTION_TITLES
+    return all(title in body for title in titles)
+
+
 def _has_weekly_structure(text: str, is_cjk: bool) -> bool:
     body = str(text or "")
     matches = ZH_DAY_RE.findall(body) if is_cjk else EN_DAY_RE.findall(body)
-    return len(matches) >= 5
+    cleaned = {str(item).strip().lower() for item in matches if str(item).strip()}
+    return len(cleaned) >= 5
 
 
 def _looks_like_markdown_table(text: str) -> bool:
@@ -79,6 +89,7 @@ def _looks_like_markdown_table(text: str) -> bool:
 def _needs_rewrite(user_message: str, text: str) -> bool:
     original_message = _original_user_message(user_message)
     body = (text or "").strip()
+    is_cjk = _is_cjk_user_message(original_message)
     if not body:
         return True
     if PLACEHOLDER_RE.search(body):
@@ -87,14 +98,18 @@ def _needs_rewrite(user_message: str, text: str) -> bool:
         return True
     if _looks_like_markdown_table(body):
         return True
+    if DIRTY_TEMPLATE_RE.search(body):
+        return True
     if WORKOUT_LEAK_RE.search(body):
+        return True
+    if not _has_expected_sections(body, is_cjk):
         return True
     if _is_weekly_request(original_message):
         if ONE_DAY_RE.search(body):
             return True
-        if not _has_weekly_structure(body, _is_cjk_user_message(original_message)):
+        if not _has_weekly_structure(body, is_cjk):
             return True
-    if _is_cjk_user_message(original_message):
+    if is_cjk:
         if EN_SECTION_RE.search(body):
             return True
         english_words = re.findall(r"[A-Za-z]{3,}", body)
