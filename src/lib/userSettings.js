@@ -62,7 +62,7 @@ function normalizeDay(value, fallback) {
 
 export function normalizeUserSettings(row = {}) {
   return {
-    unit_system: row.unit_system === 'imperial' ? 'imperial' : 'metric',
+    unit_system: 'metric',
     theme: ['light', 'dark', 'system'].includes(row.theme) ? row.theme : 'light',
     notification_workout_enabled: toBoolean(
       row.notification_workout_enabled,
@@ -141,7 +141,7 @@ export function normalizeUserSettings(row = {}) {
 export function buildUserSettingsPayload(value = {}) {
   const settings = normalizeUserSettings(value)
   return {
-    unit_system: settings.unit_system,
+    unit_system: 'metric',
     theme: settings.theme,
     notification_workout_enabled: settings.notification_workout_enabled,
     notification_workout_time: settings.notification_workout_time,

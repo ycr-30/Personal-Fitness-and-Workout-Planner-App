@@ -59,7 +59,6 @@ function syncAuthSnapshot(auth, nextSettings) {
   if (!auth.user) return
   const updates = {}
   if (auth.user.theme !== nextSettings.theme) updates.theme = nextSettings.theme
-  if (auth.user.unit !== nextSettings.unit_system) updates.unit = nextSettings.unit_system
   if (Object.keys(updates).length) auth.updateProfile(updates)
 }
 
@@ -76,8 +75,7 @@ async function ensureSettingsRow(auth, supabaseUser) {
   const seed = {
     ...buildUserSettingsPayload({
       ...defaultUserSettings,
-      theme: auth.user?.theme || defaultUserSettings.theme,
-      unit_system: auth.user?.unit || defaultUserSettings.unit_system
+      theme: auth.user?.theme || defaultUserSettings.theme
     }),
     user_id: supabaseUser.id
   }
@@ -121,8 +119,7 @@ export function useUserSettings() {
         if (!cached) {
           const fallback = normalizeUserSettings({
             ...defaultUserSettings,
-            theme: auth.user?.theme || defaultUserSettings.theme,
-            unit_system: auth.user?.unit || defaultUserSettings.unit_system
+            theme: auth.user?.theme || defaultUserSettings.theme
           })
           settings.value = fallback
           writeCachedUserSettings(auth.user, fallback)

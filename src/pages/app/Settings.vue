@@ -13,37 +13,11 @@
         <header class="card-header">
           <div>
             <h2>App Preferences</h2>
-            <p>Core display preferences that affect the app everywhere.</p>
+            <p>Core display preferences that apply across the app.</p>
           </div>
         </header>
 
         <div class="card-content">
-          <div class="pref-row">
-            <div class="pref-copy">
-              <strong>Unit System</strong>
-              <p>Used for measurements and form defaults across the app.</p>
-            </div>
-
-            <div class="pref-control">
-              <div class="segmented">
-                <button
-                  type="button"
-                  :class="['segment', { active: form.unit_system === 'metric' }]"
-                  @click="form.unit_system = 'metric'"
-                >
-                  Metric
-                </button>
-                <button
-                  type="button"
-                  :class="['segment', { active: form.unit_system === 'imperial' }]"
-                  @click="form.unit_system = 'imperial'"
-                >
-                  Imperial
-                </button>
-              </div>
-            </div>
-          </div>
-
           <div class="pref-row">
             <div class="pref-copy">
               <strong>Theme</strong>
