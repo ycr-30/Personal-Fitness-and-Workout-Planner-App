@@ -1,9 +1,8 @@
 import { supabase } from './supabaseClient'
 import { getUserStorageKey } from './userStorage'
+import { buildAuthServerUrl } from './authServerOrigin'
 import { buildDefaultNutritionTargets, toNumber } from '@/utils/nutritionCalculations'
 import { buildPlanGoalLink } from '@/utils/nutritionGoalMapping'
-
-const NUTRITION_AI_ORIGIN = import.meta.env.VITE_NUTRITION_AGENT_ORIGIN || 'http://localhost:8000'
 
 function readJson(key, fallback) {
   if (typeof window === 'undefined') return fallback
@@ -89,9 +88,10 @@ async function requestNutritionTargetRecommendation({
   goalType,
   nutritionSummary
 }) {
-  const response = await fetch(`${NUTRITION_AI_ORIGIN}/nutrition/targets`, {
+  const response = await fetch(buildAuthServerUrl('/api/ai/nutrition/targets'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({
       goal_type: goalType,
       plan_goal_label: planGoalLink?.workoutGoalLabel || '',

@@ -17,7 +17,7 @@ dotenv.config({ path: resolve(__dirname, '../.env.local') })
 
 const {
   PORT = 4000,
-  APP_ORIGIN = 'http://localhost:5173',
+  APP_ORIGIN: APP_ORIGIN_RAW = 'http://localhost:5173',
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
   GOOGLE_REDIRECT_URI,
@@ -50,6 +50,14 @@ const {
   RAG_SOURCE_TYPES = '',
   JWT_SECRET = 'replace-me'
 } = process.env
+
+function parseAllowedOrigins(rawValue) {
+  return [...new Set(String(rawValue || '').split(',').map((item) => item.trim()).filter(Boolean))]
+}
+
+const APP_ORIGINS = parseAllowedOrigins(APP_ORIGIN_RAW)
+const ALLOWED_APP_ORIGINS = new Set(APP_ORIGINS)
+const APP_ORIGIN = APP_ORIGINS[0] || 'http://localhost:5173'
 
 const SUPABASE_URL = RAW_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
 const SUPABASE_PUBLIC_KEY =
@@ -164,7 +172,9 @@ const WORKOUT_ONLY_OVERRIDE_RE =
 const NUTRITION_INTENT_RE =
   /\b(?:calories?|kcal|protein|macro|diet|dietary|nutrition|meal(?:s)?|meal plan|diet plan|weekly meal plan|7[- ]day meal plan|seven day meal plan|meal prep|food|recipe|breakfast|lunch|dinner|snack|hydration|water)\b|(?:饮食|营养|热量|卡路里|蛋白|脂肪|碳水|饮食计划|食谱|餐单|菜谱|早餐|午餐|晚餐|加餐|零食|吃什么|食物|补水|喝水|一周饮食|七天饮食|一周餐单|七天餐单|一周食谱|七天食谱|饮食安排|营养安排)/i
 const WORKOUT_INTENT_RE =
-  /\b(?:workout|training|exercise|sets?|reps?|bench|squat|deadlift|program|training plan|workout plan|strength|hypertrophy|1rm|gym|cardio|mobility|split)\b|(?:训练|健身|动作|组数|次数|卧推|深蹲|硬拉|力量|肌肥大|训练计划|健身计划|训练安排|动作安排|练胸|练背|练腿|有氧|活动度|分化训练)/i
+  /\b(?:workout|training|traing|trainig|exercise|excercise|sets?|reps?|bench|squat|deadlift|program|training plan|workout plan|strength|hypertrophy|1rm|gym|cardio|mobility|split)\b|(?:训练|健身|动作|组数|次数|卧推|深蹲|硬拉|力量|肌肥大|训练计划|健身计划|训练安排|动作安排|练胸|练背|练腿|有氧|活动度|分化训练)/i
+const WORKOUT_BODY_PART_HINT_RE =
+  /\b(?:advice|plan|routine|program|workout|training|traing|trainig|exercise|excercise)\b.{0,24}\b(?:back|chest|leg|legs|shoulder|shoulders|arm|arms|biceps|triceps|glutes?|lats?|core|abs|hamstrings?|quads?)\b|\b(?:back|chest|leg|legs|shoulder|shoulders|arm|arms|biceps|triceps|glutes?|lats?|core|abs|hamstrings?|quads?)\b.{0,24}\b(?:advice|plan|routine|program|workout|training|traing|trainig|exercise|excercise)\b|(?:背部|胸部|腿部|肩部|手臂|二头|三头|臀部|背阔肌|核心|腹肌|股四头|腘绳肌).{0,16}(?:训练|健身|动作|计划|安排|建议)/i
 const BOTH_EXPLICIT_RE =
   /(?:训练.*饮食|饮食.*训练|营养.*训练|训练.*营养|\b(?:workout.*nutrition|nutrition.*workout|training.*diet|diet.*training|workout.*meal|meal.*workout|training.*meal|meal.*training)\b)/i
 const ANALYTICS_DIRTY_TEXT_RE = /\b(?:WORKOUT ADVICE|NUTRITION ADVICE|Draft response|Key conclusions?|Risks?\s*\/\s*bottlenecks?|Next\s*7[- ]day action plan|Sources?)\b/i
@@ -1024,7 +1034,7 @@ async function hydrateServerUserPayloadFromSession(decoded) {
   return buildLocalSessionUser(user, localAccount)
 }
 
-function resolveRedirectTarget(raw) {
+function resolveRedirectTarget(raw, req = null) {
   if (!raw || typeof raw !== 'string') return null
   let candidate = raw
   try {
@@ -1032,19 +1042,53 @@ function resolveRedirectTarget(raw) {
   } catch (err) {
     candidate = raw
   }
-  if (candidate.startsWith('/')) return `${APP_ORIGIN}${candidate}`
+  if (candidate.startsWith('/')) return `${resolveRequestAppOrigin(req)}${candidate}`
   try {
     const url = new URL(candidate)
-    if (url.origin === APP_ORIGIN) return url.toString()
+    if (isAllowedAppOrigin(url.origin)) return url.toString()
   } catch (err) {
     return null
   }
   return null
 }
 
+function isAllowedAppOrigin(origin) {
+  return ALLOWED_APP_ORIGINS.has(String(origin || '').trim())
+}
+
+function resolveRequestAppOrigin(req = null) {
+  const requestOrigin = String(req?.headers?.origin || '').trim()
+  if (isAllowedAppOrigin(requestOrigin)) return requestOrigin
+
+  const referer = String(req?.headers?.referer || '').trim()
+  if (referer) {
+    try {
+      const refererUrl = new URL(referer)
+      if (isAllowedAppOrigin(refererUrl.origin)) return refererUrl.origin
+    } catch (err) {
+      // Ignore malformed referer headers and fall back to the primary app origin.
+    }
+  }
+
+  return APP_ORIGIN
+}
+
+function resolveTargetOrigin(target) {
+  try {
+    return new URL(String(target || '')).origin
+  } catch {
+    return ''
+  }
+}
+
 app.use(
   cors({
-    origin: APP_ORIGIN,
+    origin(origin, callback) {
+      if (!origin || isAllowedAppOrigin(origin)) {
+        return callback(null, true)
+      }
+      return callback(new Error(`Origin not allowed by CORS: ${origin}`))
+    },
     credentials: true
   })
 )
@@ -1643,7 +1687,7 @@ function detectChatIntent(value) {
   if (BOTH_EXPLICIT_RE.test(text)) return 'both'
 
   const hasNutrition = NUTRITION_INTENT_RE.test(text)
-  const hasWorkout = WORKOUT_INTENT_RE.test(text)
+  const hasWorkout = WORKOUT_INTENT_RE.test(text) || WORKOUT_BODY_PART_HINT_RE.test(text)
   if (hasNutrition && !hasWorkout) return 'nutrition'
   if (hasWorkout && !hasNutrition) return 'workout'
   if (hasNutrition && hasWorkout) return 'both'
@@ -2052,23 +2096,31 @@ async function requestChatCompletion({ messages, user, ragChunks, ragContextText
   return extractAssistantContent(payload)
 }
 
-function buildAnalyticsApiUrl() {
+function buildAgentApiUrl(targetPath) {
   const endpoint = resolveChatApiUrl()
-  if (!endpoint) return ''
+  const normalizedTargetPath = `/${String(targetPath || '')
+    .trim()
+    .replace(/^\/+/, '')}`
+  if (!endpoint || normalizedTargetPath === '/') return ''
   try {
     const url = new URL(endpoint)
-    url.pathname = url.pathname.replace(/\/chat\/?$/i, '/analytics/insight')
+    url.pathname = /\/chat\/?$/i.test(url.pathname)
+      ? url.pathname.replace(/\/chat\/?$/i, normalizedTargetPath)
+      : `${url.pathname.replace(/\/$/, '')}${normalizedTargetPath}`
     url.search = ''
     return url.toString()
   } catch {
-    return ''
+    if (/\/chat\/?$/i.test(endpoint)) {
+      return endpoint.replace(/\/chat\/?$/i, normalizedTargetPath)
+    }
+    return `${endpoint.replace(/\/$/, '')}${normalizedTargetPath}`
   }
 }
 
-async function requestAnalyticsInsight({ summary, rangeDays, snapshotVersion, userProfile }) {
-  const endpoint = buildAnalyticsApiUrl()
+async function requestCustomAgentEndpoint({ path, payload, timeoutMs = CHAT_REQUEST_TIMEOUT_MS, label }) {
+  const endpoint = buildAgentApiUrl(path)
   if (!endpoint) {
-    throw new Error('Analytics insight endpoint is not configured.')
+    throw new Error(`${label} endpoint is not configured.`)
   }
 
   const headers = { 'Content-Type': 'application/json' }
@@ -2081,23 +2133,32 @@ async function requestAnalyticsInsight({ summary, rangeDays, snapshotVersion, us
     {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        summary,
-        range_days: rangeDays,
-        snapshot_version: snapshotVersion,
-        user_profile: userProfile || null
-      })
+      body: JSON.stringify(payload || {})
     },
-    CHAT_REQUEST_TIMEOUT_MS,
-    'Analytics insight request'
+    timeoutMs,
+    `${label} request`
   )
 
   if (!response.ok) {
     const errorText = await response.text()
-    throw new Error(errorText || `Analytics insight endpoint error: ${response.status}`)
+    throw new Error(errorText || `${label} endpoint error: ${response.status}`)
   }
 
-  const payload = await response.json().catch(() => ({}))
+  return response.json().catch(() => ({}))
+}
+
+async function requestAnalyticsInsight({ summary, rangeDays, snapshotVersion, userProfile }) {
+  const payload = await requestCustomAgentEndpoint({
+    path: '/analytics/insight',
+    payload: {
+      summary,
+      range_days: rangeDays,
+      snapshot_version: snapshotVersion,
+      user_profile: userProfile || null
+    },
+    timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+    label: 'Analytics insight'
+  })
   return payload?.insight || null
 }
 
@@ -2967,7 +3028,7 @@ app.get('/auth/google', (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
     return res.status(500).send('Google OAuth is not configured.')
   }
-  const redirectTarget = resolveRedirectTarget(req.query.redirect)
+  const redirectTarget = resolveRedirectTarget(req.query.redirect, req)
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: GOOGLE_REDIRECT_URI,
@@ -3013,10 +3074,9 @@ app.get('/auth/google/callback', async (req, res) => {
       idToken,
       audience: GOOGLE_CLIENT_ID
     })
-    const redirectTarget = resolveRedirectTarget(
-      typeof state === 'string' ? state : redirect
-    )
-    const appCallback = new URL('/auth/callback', APP_ORIGIN)
+    const redirectTarget = resolveRedirectTarget(typeof state === 'string' ? state : redirect, req)
+    const callbackOrigin = resolveTargetOrigin(redirectTarget) || APP_ORIGIN
+    const appCallback = new URL('/auth/callback', callbackOrigin)
     if (redirectTarget) {
       appCallback.searchParams.set('redirect', redirectTarget)
     }
@@ -3686,6 +3746,51 @@ app.post('/api/ai/analytics/insights', requireAuth, async (req, res) => {
       errorMessage: err?.message || 'Failed to generate analytics insight.'
     })
     return res.status(500).json({ error: 'Failed to generate analytics insight.' })
+  }
+})
+
+app.post('/api/ai/nutrition/cards', requireAuth, async (req, res) => {
+  try {
+    const payload = await requestCustomAgentEndpoint({
+      path: '/nutrition/cards',
+      payload: req.body && typeof req.body === 'object' ? req.body : {},
+      timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+      label: 'Nutrition cards'
+    })
+    return res.json(payload)
+  } catch (err) {
+    console.error('Failed to load nutrition AI cards', err)
+    return res.status(502).json({ error: err?.message || 'Failed to load nutrition AI cards.' })
+  }
+})
+
+app.post('/api/ai/nutrition/targets', requireAuth, async (req, res) => {
+  try {
+    const payload = await requestCustomAgentEndpoint({
+      path: '/nutrition/targets',
+      payload: req.body && typeof req.body === 'object' ? req.body : {},
+      timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+      label: 'Nutrition targets'
+    })
+    return res.json(payload)
+  } catch (err) {
+    console.error('Failed to load nutrition AI targets', err)
+    return res.status(502).json({ error: err?.message || 'Failed to load nutrition AI targets.' })
+  }
+})
+
+app.post('/api/ai/nutrition/estimate-food', requireAuth, async (req, res) => {
+  try {
+    const payload = await requestCustomAgentEndpoint({
+      path: '/nutrition/estimate-food',
+      payload: req.body && typeof req.body === 'object' ? req.body : {},
+      timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+      label: 'Nutrition estimate'
+    })
+    return res.json(payload)
+  } catch (err) {
+    console.error('Failed to estimate nutrition food', err)
+    return res.status(502).json({ error: err?.message || 'Failed to estimate nutrition food.' })
   }
 })
 

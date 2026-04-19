@@ -150,6 +150,7 @@ import { useFoodSearch } from '@/composables/useFoodSearch'
 import { calculateEntryFromFood, deriveFoodBaseFromEntry, roundNutrition, toNumber } from '@/utils/nutritionCalculations'
 import { mealTypeOptions } from '@/utils/mealTimeResolver'
 import { useAuthStore } from '@/stores/auth'
+import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -164,7 +165,6 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'submit'])
 const auth = useAuthStore()
-const NUTRITION_AI_ORIGIN = import.meta.env.VITE_NUTRITION_AGENT_ORIGIN || 'http://localhost:8000'
 
 const {
   query,
@@ -422,9 +422,10 @@ async function estimateCustomFood() {
 
   estimateLoading.value = true
   try {
-    const response = await fetch(`${NUTRITION_AI_ORIGIN}/nutrition/estimate-food`, {
+    const response = await fetch(buildAuthServerUrl('/api/ai/nutrition/estimate-food'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         food_name: custom.foodName,
         brand_or_note: custom.brand || '',

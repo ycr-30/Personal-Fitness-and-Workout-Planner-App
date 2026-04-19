@@ -4,8 +4,7 @@ import { buildNutritionAlerts } from '@/utils/nutritionAlerts'
 import { resolveMealTypeLabel, toDateKey } from '@/utils/mealTimeResolver'
 import { toNumber } from '@/utils/nutritionCalculations'
 import { recordAiAgentRun } from '@/lib/aiAgentMetrics'
-
-const NUTRITION_AI_ORIGIN = import.meta.env.VITE_NUTRITION_AGENT_ORIGIN || 'http://localhost:8000'
+import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 
 function buildInsightFallback(summary, trendSeries, goalType) {
   const target = summary?.targets || {}
@@ -102,9 +101,10 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
     }
 
     try {
-      const response = await fetch(`${NUTRITION_AI_ORIGIN}/nutrition/cards`, {
+      const response = await fetch(buildAuthServerUrl('/api/ai/nutrition/cards'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(payload)
       })
 

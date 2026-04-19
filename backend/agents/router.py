@@ -36,10 +36,20 @@ NUTRITION_KW = re.compile(
 )
 
 WORKOUT_KW = re.compile(
-    r"\b(?:workout|training|exercise|sets?|reps?|bench|squat|deadlift|program|training plan|"
+    r"\b(?:workout|training|traing|trainig|exercise|excercise|sets?|reps?|bench|squat|deadlift|program|training plan|"
     r"workout plan|strength|hypertrophy|1rm|gym|cardio|mobility|split)\b|"
     r"(?:训练|健身|动作|组数|次数|卧推|深蹲|硬拉|力量|肌肥大|训练计划|健身计划|训练安排|"
     r"动作安排|练胸|练背|练腿|有氧|活动度|分化训练)",
+    re.I,
+)
+
+BODY_PART_WORKOUT_HINT = re.compile(
+    r"\b(?:advice|plan|routine|program|workout|training|traing|trainig|exercise|excercise)\b.{0,24}\b"
+    r"(?:back|chest|leg|legs|shoulder|shoulders|arm|arms|biceps|triceps|glutes?|lats?|core|abs|hamstrings?|quads?)\b|"
+    r"\b(?:back|chest|leg|legs|shoulder|shoulders|arm|arms|biceps|triceps|glutes?|lats?|core|abs|hamstrings?|quads?)\b.{0,24}\b"
+    r"(?:advice|plan|routine|program|workout|training|traing|trainig|exercise|excercise)\b|"
+    r"(?:背部|胸部|腿部|肩部|手臂|二头|三头|臀部|背阔肌|核心|腹肌|股四头|腘绳肌).{0,16}"
+    r"(?:训练|健身|动作|计划|安排|建议)",
     re.I,
 )
 
@@ -97,6 +107,8 @@ def is_workout_only_request(message: str) -> bool:
     if WORKOUT_ONLY_OVERRIDE.search(text):
         return True
     if STRUCTURED_WORKOUT_ONLY_RE.search(text) and not NUTRITION_KW.search(text):
+        return True
+    if BODY_PART_WORKOUT_HINT.search(text) and not NUTRITION_KW.search(text):
         return True
     return bool(WORKOUT_KW.search(text)) and not bool(NUTRITION_KW.search(text))
 
@@ -159,7 +171,7 @@ def route(message: str) -> str:
         return "workout"
 
     n = bool(NUTRITION_KW.search(text))
-    w = bool(WORKOUT_KW.search(text))
+    w = bool(WORKOUT_KW.search(text) or BODY_PART_WORKOUT_HINT.search(text))
 
     if n and not w:
         return "nutrition"
