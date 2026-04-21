@@ -156,22 +156,6 @@
     </section>
 
     <section>
-      <h2>Governing law and venue</h2>
-      <p>
-        For this pre-launch public version of Fitness AI Planner, the final governing-law and
-        venue position has not yet been formally designated by the operator. Before broader
-        public launch, this section should be updated with the final governing law and court or
-        venue position chosen by the operator, subject to any mandatory law that applies to you.
-      </p>
-      <p>
-        Until that final designation is published, nothing in these Terms is intended to remove
-        or limit any rights you may have under mandatory consumer, employment, data protection,
-        or other applicable law, including any right to bring a claim in a court or forum made
-        available by that law.
-      </p>
-    </section>
-
-    <section>
       <h2>Changes to these Terms</h2>
       <p>
         These Terms may change as the service evolves. When material changes are made, Fitness

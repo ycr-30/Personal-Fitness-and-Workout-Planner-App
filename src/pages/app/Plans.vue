@@ -22,7 +22,36 @@
     <section v-if="!selectedGoal" class="card empty-state">
       <h2>No goal selected yet</h2>
       <p>Tap the activity card to choose your workout goal.</p>
-      <button class="btn primary" type="button" @click="openGoalModal(1)">Choose Goal</button>
+      <article v-if="initialPlanRecommendation" class="onboarding-recommendation">
+        <div class="recommendation-head">
+          <span class="recommendation-badge">Onboarding Match</span>
+          <h3>{{ initialPlanRecommendation.title }}</h3>
+          <p>{{ initialPlanRecommendation.summary }}</p>
+        </div>
+
+        <div class="recommendation-metrics">
+          <span class="recommendation-chip">{{ initialPlanRecommendation.frequencyLabel }}</span>
+          <span class="recommendation-chip">{{ initialPlanRecommendation.sessionDurationLabel }}</span>
+          <span class="recommendation-chip">{{ initialPlanRecommendation.trainingSetupLabel }}</span>
+        </div>
+
+        <ul class="recommendation-list">
+          <li>{{ initialPlanRecommendation.setupNote }}</li>
+          <li>{{ initialPlanRecommendation.limitationNote }}</li>
+          <li>{{ initialPlanRecommendation.challengeNote }}</li>
+        </ul>
+
+        <div class="recommendation-actions">
+          <button class="btn primary" type="button" @click="applyOnboardingRecommendation">
+            Use onboarding recommendation
+          </button>
+          <button class="btn ghost" type="button" @click="openGoalModal(1)">
+            Choose manually
+          </button>
+        </div>
+      </article>
+
+      <button v-else class="btn primary" type="button" @click="openGoalModal(1)">Choose Goal</button>
     </section>
 
     <template v-else>
@@ -832,7 +861,7 @@
               </div>
 
               <div class="record-list">
-                <article v-for="record in recentWeightRecords" :key="record.date" class="record-item">
+                <article v-for="(record, index) in recentWeightRecords" :key="weightRecordKey(record, index)" class="record-item">
                   <div>
                     <strong>{{ recordValue(record) }}</strong>
                     <p>Manual entry</p>
@@ -884,7 +913,7 @@
                 <p>{{ weightMetricLabel }}</p>
               </div>
               <div class="record-list">
-                <article v-for="record in weightRecordsInRange" :key="record.date" class="record-item">
+                <article v-for="(record, index) in weightRecordsInRange" :key="weightRecordKey(record, index)" class="record-item">
                   <div>
                     <strong>{{ recordValue(record) }}</strong>
                     <p>Manual entry</p>
@@ -908,6 +937,18 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { syncNutritionGoalsWithPlan } from '@/lib/nutritionGoalSync'
+import {
+  formatMovementLimitationLabels,
+  frequencySessionCountMap,
+  onboardingLabelMaps,
+  sessionDurationMinutesMap
+} from '@/lib/onboardingOptions'
+import {
+  buildPlanWeightRecord,
+  getPlanWeightRecordTime,
+  sanitizePlanStateSnapshot,
+  sanitizePlanWeightRecords
+} from '@/lib/planWeightRecords'
 import { getUserStorageKey } from '@/lib/userStorage'
 
 const auth = useAuthStore()
@@ -1347,6 +1388,7 @@ const activeDetailType = computed(() => {
 })
 
 const isWeightLoss = computed(() => activeDetailType.value === 'weight-loss')
+const onboardingAnswers = computed(() => auth.user?.onboarding?.answers || null)
 
 const activityProgress = computed(() => {
   const target = Number(planState.challengeValues.activity) || 0
@@ -1456,6 +1498,44 @@ const comboRecommendation = computed(() => {
     }
   }
   return getWeightLossRecommendation()
+})
+
+const initialPlanRecommendation = computed(() => {
+  const onboarding = onboardingAnswers.value
+  if (!onboarding) return null
+
+  const recommendedGoal = resolveOnboardingGoalRecommendation(onboarding)
+  const weeklySessions = frequencySessionCountMap[onboarding.frequency] || 4
+  const sessionMinutes = sessionDurationMinutesMap[onboarding.sessionDuration] || 55
+  const movementLabels = formatMovementLimitationLabels(onboarding.movementLimitations || [])
+  const recommendedChallenges = (goalMap[recommendedGoal.goalId]?.recommendedChallenges || [])
+    .map((id) => challengeMap[id]?.title)
+    .filter(Boolean)
+
+  const goalLabel = goalMap[recommendedGoal.goalId]?.shortTitle || 'Training plan'
+  const trainingSetupLabel = onboardingLabelMaps.trainingSetup[onboarding.trainingSetup] || 'Mixed setup'
+  const frequencyLabel = onboardingLabelMaps.frequency[onboarding.frequency] || `${weeklySessions} sessions per week`
+  const sessionDurationLabel =
+    onboardingLabelMaps.sessionDuration[onboarding.sessionDuration] || `${sessionMinutes} min`
+
+  return {
+    goalId: recommendedGoal.goalId,
+    focusId: recommendedGoal.focusId,
+    weeklySessions,
+    sessionMinutes,
+    goalLabel,
+    frequencyLabel,
+    sessionDurationLabel,
+    trainingSetupLabel,
+    title: `${goalLabel} starting point`,
+    summary: `Start with a ${goalLabel.toLowerCase()} block shaped around ${weeklySessions} sessions per week, ${sessionMinutes}-minute sessions, and your current setup.`,
+    setupNote: describeTrainingSetupRecommendation(onboarding.trainingSetup, recommendedGoal.goalId),
+    limitationNote: describeMovementRecommendation(movementLabels),
+    challengeNote: recommendedChallenges.length
+      ? `Suggested tracking focus: ${recommendedChallenges.join(', ')}.`
+      : 'Suggested tracking focus will be added after you pick a goal.',
+    movementLabels
+  }
 })
 
 const bmiDisplay = computed(() => {
@@ -1568,11 +1648,11 @@ const rangeBounds = computed(() => getRangeBounds(weightDetailRange.value, weigh
 const weightRecordsChart = computed(() => {
   const records = Array.isArray(planState.weightRecords) ? planState.weightRecords : []
   const filtered = filterRecordsByRange(records, weightDetailRange.value, weightRangeOffset.value)
-  return filtered.slice().sort((a, b) => (a.date > b.date ? 1 : -1))
+  return filtered.slice().sort((a, b) => getPlanWeightRecordTime(a) - getPlanWeightRecordTime(b))
 })
 
 const weightRecordsInRange = computed(() => {
-  return weightRecordsChart.value.slice().sort((a, b) => (a.date < b.date ? 1 : -1))
+  return weightRecordsChart.value.slice().sort((a, b) => getPlanWeightRecordTime(b) - getPlanWeightRecordTime(a))
 })
 
 const recentWeightRecords = computed(() => weightRecordsInRange.value.slice(0, 3))
@@ -1604,7 +1684,17 @@ const weightChartPoints = computed(() => weightChart.value.points)
 const chartTargetY = computed(() => weightChart.value.targetY)
 const weightChartAxis = computed(() => {
   const labels = getAxisLabels(weightChart.value.min, weightChart.value.max)
-  const xLabels = getRangeLabels(rangeBounds.value)
+  const xLabels =
+    weightRecordsChart.value.length > 0 && weightRecordsChart.value.length <= 4
+      ? (() => {
+          const duplicateDates = new Set(
+            weightRecordsChart.value
+              .map((record) => String(record?.date || '').trim())
+              .filter((date, index, list) => date && list.indexOf(date) !== index)
+          )
+          return weightRecordsChart.value.map((record) => formatWeightAxisLabel(record, duplicateDates))
+        })()
+      : getRangeLabels(rangeBounds.value)
   return { yLabels: labels, xLabels }
 })
 const chartTargetOffset = computed(() => {
@@ -1752,6 +1842,175 @@ const modalCopy = computed(() => {
   }
   return copyMap[activeModal.value] || { title: '', subtitle: '' }
 })
+
+function resolveOnboardingGoalRecommendation(onboarding) {
+  if (!onboarding) return { goalId: 'health', focusId: 'health-frequency' }
+  if (onboarding.goal === 'fat-loss') return { goalId: 'weight-loss', focusId: null }
+  if (onboarding.goal === 'muscle-gain') return { goalId: 'muscle', focusId: 'weight-gain' }
+  return { goalId: 'health', focusId: 'health-frequency' }
+}
+
+function describeTrainingSetupRecommendation(trainingSetup, goalId) {
+  if (trainingSetup === 'home-bodyweight') {
+    return goalId === 'weight-loss'
+      ? 'Bias the first block toward brisk, low-complexity full-body work and low-impact conditioning you can repeat consistently at home.'
+      : 'Bias the first block toward bodyweight circuits, tempo work, and repeatable movement quality before chasing volume.'
+  }
+  if (trainingSetup === 'home-basic-kit') {
+    return 'Use dumbbells, bands, or kettlebells as the main progression tools and keep exercise selection compact and repeatable.'
+  }
+  if (trainingSetup === 'gym-full-access') {
+    return 'Use full gym access to anchor the plan around compound lifts, accessories, and better load progression from week to week.'
+  }
+  return 'Keep the first block flexible enough to work across home, gym, and travel days without changing the core weekly structure.'
+}
+
+function describeMovementRecommendation(labels = []) {
+  const filtered = Array.isArray(labels)
+    ? labels.filter((label) => label && label !== 'No current restrictions')
+    : []
+  if (!filtered.length) {
+    return 'No current movement limitations were flagged, so the recommendation can progress normally and tighten based on logged training.'
+  }
+  return `Start conservatively around ${filtered.join(', ').toLowerCase()} and use exercise substitutions or load limits where needed.`
+}
+
+function resolveInitialIntakeMultiplier(goalId, nutrition) {
+  if (goalId === 'muscle') {
+    if (nutrition === 'calorie-surplus') return 34
+    if (nutrition === 'maintenance') return 32
+    return 31
+  }
+  if (goalId === 'weight-loss') {
+    if (nutrition === 'maintenance') return 30
+    return 29
+  }
+  if (nutrition === 'calorie-surplus') return 33
+  if (nutrition === 'maintenance') return 31
+  return 29
+}
+
+function buildInitialChallengeTargets(onboarding, { goalId, weeklySessions, sessionMinutes, currentWeight }) {
+  const limitationValues = Array.isArray(onboarding?.movementLimitations) ? onboarding.movementLimitations : []
+  const hasRestrictions = limitationValues.some((item) => item && item !== 'none')
+  const lowImpactBias = limitationValues.includes('impact') || limitationValues.includes('knees')
+
+  const dailyDuration = clamp(Math.round((weeklySessions * sessionMinutes) / 7), 20, 75)
+  const activityMultiplier =
+    onboarding?.trainingSetup === 'home-bodyweight'
+      ? 5
+      : onboarding?.trainingSetup === 'gym-full-access'
+        ? 6.5
+        : 6
+  const rawActivity = Math.round((weeklySessions * sessionMinutes * activityMultiplier) / 7)
+  const activity = clamp(lowImpactBias ? Math.round(rawActivity * 0.9) : rawActivity, 140, 420)
+  const stepsBase = hasRestrictions ? 6500 : 7500
+  const steps = clamp(stepsBase + (weeklySessions - 2) * 750, 6000, 12000)
+
+  const setsPerSession =
+    onboarding?.trainingSetup === 'gym-full-access'
+      ? 5
+      : onboarding?.trainingSetup === 'home-basic-kit'
+        ? 4
+        : 3
+  const strengthSets = clamp(
+    weeklySessions * setsPerSession - (hasRestrictions ? 2 : 0),
+    8,
+    28
+  )
+
+  const safeWeight = currentWeight || 70
+  const intakeMultiplier = resolveInitialIntakeMultiplier(goalId, onboarding?.nutrition)
+  const intake = clamp(Math.round(safeWeight * intakeMultiplier), 1600, 3600)
+
+  return {
+    duration: dailyDuration,
+    activity,
+    steps,
+    strengthSets,
+    intake
+  }
+}
+
+function hydratePlanMetricsFromProfile() {
+  const nextHeight = toNumber(planState.bodyMetrics.heightCm) ?? toNumber(auth.user?.height ?? auth.user?.heightCm)
+  const nextBodyFat = toNumber(planState.bodyMetrics.bodyFat) ?? toNumber(auth.user?.bodyFat)
+  if (nextHeight != null) {
+    planState.bodyMetrics.heightCm = Number(nextHeight)
+  }
+  if (nextBodyFat != null) {
+    planState.bodyMetrics.bodyFat = Number(nextBodyFat)
+  }
+}
+
+function applyOnboardingRecommendation() {
+  const recommendation = initialPlanRecommendation.value
+  const onboarding = onboardingAnswers.value
+  if (!recommendation || !onboarding) {
+    openGoalModal(1)
+    return
+  }
+
+  const today = getTodayISO()
+  const targetDate = addDays(today, 84)
+  const currentWeight =
+    toNumber(planState.weight.current) ??
+    toNumber(planState.weight.start) ??
+    toNumber(auth.user?.weight ?? auth.user?.weightKg) ??
+    70
+
+  hydratePlanMetricsFromProfile()
+
+  selectGoal(recommendation.goalId)
+  if (recommendation.focusId) {
+    planState.focusId = recommendation.focusId
+  }
+
+  const targets = buildInitialChallengeTargets(onboarding, {
+    goalId: recommendation.goalId,
+    weeklySessions: recommendation.weeklySessions,
+    sessionMinutes: recommendation.sessionMinutes,
+    currentWeight
+  })
+
+  if (recommendation.goalId === 'weight-loss') {
+    planState.weight.start = currentWeight
+    planState.weight.current = currentWeight
+    planState.weight.startDate = today
+    planState.weight.target = Number((currentWeight - Math.min(6, Math.max(3, recommendation.weeklySessions))).toFixed(1))
+    planState.weight.targetDate = targetDate
+    planState.autoRecommend = true
+    lastRecommendationSignature.value = ''
+    applyWeightLossRecommendations()
+    addOrUpdateWeightRecord()
+    return
+  }
+
+  if (recommendation.goalId === 'muscle') {
+    planState.focusId = recommendation.focusId || 'weight-gain'
+    planState.weight.start = currentWeight
+    planState.weight.current = currentWeight
+    planState.weight.startDate = today
+    planState.weight.target = Number((currentWeight + 2.5).toFixed(1))
+    planState.weight.targetDate = targetDate
+    planState.autoRecommend = false
+    planState.challengeValues.activity = targets.activity
+    planState.challengeValues.duration = targets.duration
+    planState.challengeValues.intake = targets.intake
+    planState.challengeValues.strengthSets = targets.strengthSets
+    addOrUpdateWeightRecord()
+    return
+  }
+
+  planState.autoRecommend = false
+  planState.focusId = recommendation.focusId || 'health-frequency'
+  planState.health.frequency = recommendation.weeklySessions
+  planState.health.sessionMinutes = recommendation.sessionMinutes
+  planState.health.targetDate = targetDate
+  planState.challengeValues.duration = targets.duration
+  planState.challengeValues.steps = targets.steps
+  planState.challengeValues.activity = targets.activity
+}
 
 function openGoalModal(step = 1) {
   showGoalModal.value = true
@@ -2162,19 +2421,30 @@ function getWeightLossRecommendation() {
   const totalLoss = Math.max(current - target, 0)
   const weeklyLoss = totalLoss / (days / 7)
   const dailyDeficit = clamp(Math.round((weeklyLoss * 7700) / 7), 300, 900)
+  const onboarding = onboardingAnswers.value
+  const preferredWeeklySessions = frequencySessionCountMap[onboarding?.frequency] || 4
+  const preferredSessionMinutes = sessionDurationMinutesMap[onboarding?.sessionDuration] || 55
+  const seededWeeklyMinutes = weeklyWorkoutMinutes.value || preferredWeeklySessions * preferredSessionMinutes
+  const seededMovementLimits = Array.isArray(onboarding?.movementLimitations) ? onboarding.movementLimitations : []
+  const lowImpactBias = seededMovementLimits.includes('impact') || seededMovementLimits.includes('knees')
 
   const baseBmr = height
     ? Math.round(10 * current + 6.25 * height - 150)
     : Math.round(current * 22)
-  const activityFactor = 1.2 + Math.min(0.4, weeklyWorkoutMinutes.value / 420)
+  const activityFactor = 1.2 + Math.min(0.4, seededWeeklyMinutes / 420)
   const maintenance = Math.round(baseBmr * activityFactor)
 
   const activityTarget = clamp(Math.round(maintenance * 0.25), 250, 700)
   const exerciseTarget = clamp(Math.round(activityTarget * 0.6), 120, 500)
-  const durationTarget = clamp(Math.round(activityTarget / CALORIES_PER_MINUTE), 30, 90)
+  const preferredDailyDuration = clamp(Math.round((preferredWeeklySessions * preferredSessionMinutes) / 7), 20, 75)
+  const durationTarget = clamp(
+    Math.round((Math.round(activityTarget / CALORIES_PER_MINUTE) + preferredDailyDuration) / 2),
+    25,
+    90
+  )
   const strengthTarget = weeklyStrengthSets.value
     ? clamp(Math.round(weeklyStrengthSets.value * 1.15), 8, 40)
-    : 18
+    : clamp(preferredWeeklySessions * 4 - (lowImpactBias ? 2 : 0), 8, 28)
 
   const intake = Math.max(1200, maintenance - dailyDeficit)
   const burnTotal = maintenance
@@ -2192,7 +2462,12 @@ function getWeightLossRecommendation() {
 
 function applyWeightLossRecommendations() {
   if (!planState.autoRecommend) return
-  const signature = `${planState.weight.current}-${planState.weight.target}-${planState.weight.targetDate}-${planState.bodyMetrics.heightCm}-${weeklyWorkoutMinutes.value}-${weeklyStrengthSets.value}`
+  const onboardingSignature = JSON.stringify({
+    frequency: onboardingAnswers.value?.frequency || '',
+    sessionDuration: onboardingAnswers.value?.sessionDuration || '',
+    movementLimitations: onboardingAnswers.value?.movementLimitations || []
+  })
+  const signature = `${planState.weight.current}-${planState.weight.target}-${planState.weight.targetDate}-${planState.bodyMetrics.heightCm}-${weeklyWorkoutMinutes.value}-${weeklyStrengthSets.value}-${onboardingSignature}`
   if (signature === lastRecommendationSignature.value) return
   const rec = getWeightLossRecommendation()
   planState.challengeValues.activity = rec.activity
@@ -2206,13 +2481,13 @@ function applyWeightLossRecommendations() {
 
 function loadPlan() {
   if (typeof window === 'undefined') return
+  Object.assign(planState, createEmptyPlanState())
   const raw = window.localStorage.getItem(storageKey.value)
   if (!raw) {
-    Object.assign(planState, createEmptyPlanState())
     return
   }
   try {
-    const data = JSON.parse(raw)
+    const data = sanitizePlanStateSnapshot(JSON.parse(raw)) || {}
     if (data.goalId) planState.goalId = data.goalId
     if (data.focusId) planState.focusId = data.focusId
     if (data.autoRecommend !== undefined) planState.autoRecommend = data.autoRecommend
@@ -2223,7 +2498,11 @@ function loadPlan() {
     if (data.health) Object.assign(planState.health, data.health)
     if (data.performance) Object.assign(planState.performance, data.performance)
     if (data.bodyMetrics) Object.assign(planState.bodyMetrics, data.bodyMetrics)
-    if (Array.isArray(data.weightRecords)) planState.weightRecords = data.weightRecords
+    if (Array.isArray(data.weightRecords)) {
+      planState.weightRecords = sanitizePlanWeightRecords(data.weightRecords)
+    } else {
+      planState.weightRecords = []
+    }
     if (Array.isArray(data.circumferenceRecords)) {
       planState.circumferenceRecords = data.circumferenceRecords
         .map((item) => ({
@@ -2252,11 +2531,18 @@ function loadPlan() {
 
 function savePlan() {
   if (typeof window === 'undefined') return
+  const sanitizedWeightRecords = sanitizePlanWeightRecords(planState.weightRecords)
+  const normalizedWeight = sanitizePlanStateSnapshot({
+    goalId: planState.goalId,
+    focusId: planState.focusId,
+    weight: planState.weight,
+    weightRecords: sanitizedWeightRecords
+  })?.weight || planState.weight
   const payload = {
     goalId: planState.goalId,
     focusId: planState.focusId,
     autoRecommend: planState.autoRecommend,
-    weight: planState.weight,
+    weight: normalizedWeight,
     circumference: planState.circumference,
     posture: planState.posture,
     running: planState.running,
@@ -2265,7 +2551,7 @@ function savePlan() {
     challengeValues: planState.challengeValues,
     selectedChallenges: planState.selectedChallenges,
     bodyMetrics: planState.bodyMetrics,
-    weightRecords: planState.weightRecords,
+    weightRecords: sanitizedWeightRecords,
     circumferenceRecords: planState.circumferenceRecords,
     muscleAbility: planState.muscleAbility,
     dailyLogs: planState.dailyLogs,
@@ -2473,8 +2759,10 @@ function buildChart(records, metric, targetValue) {
     .filter((value) => value != null)
   if (!values.length) return empty
   const allValues = targetValue != null ? [...values, targetValue] : values
-  const min = Math.min(...allValues)
-  const max = Math.max(...allValues)
+  const actualMin = Math.min(...allValues)
+  const actualMax = Math.max(...allValues)
+  const min = actualMin === actualMax ? actualMin - 0.5 : actualMin
+  const max = actualMin === actualMax ? actualMax + 0.5 : actualMax
   const range = max - min || 1
   const width = 360
   const height = 120
@@ -2484,10 +2772,10 @@ function buildChart(records, metric, targetValue) {
   const paddingRight = 10
   const usableHeight = height - paddingTop - paddingBottom
   const usableWidth = width - paddingLeft - paddingRight
-  const step = values.length > 1 ? usableWidth / (values.length - 1) : usableWidth
+  const step = values.length > 1 ? usableWidth / (values.length - 1) : 0
 
   const points = values.map((value, index) => {
-    const x = paddingLeft + index * step
+    const x = values.length === 1 ? paddingLeft + usableWidth / 2 : paddingLeft + index * step
     const y = paddingTop + (1 - (value - min) / range) * usableHeight
     return { x, y }
   })
@@ -2544,6 +2832,22 @@ function getRangeLabels(bounds) {
   return labels
 }
 
+function weightRecordKey(record, index = 0) {
+  return record?.recordedAt || `${record?.date || 'unknown'}-${record?.weight || 'na'}-${index}`
+}
+
+function formatWeightAxisLabel(record, duplicateDates = new Set()) {
+  const date = parseISODate(record?.date)
+  if (!date) return '--'
+  if (duplicateDates.has(record?.date) && record?.recordedAt) {
+    const recordedAt = new Date(record.recordedAt)
+    if (!Number.isNaN(recordedAt.getTime())) {
+      return `${String(recordedAt.getHours()).padStart(2, '0')}:${String(recordedAt.getMinutes()).padStart(2, '0')}`
+    }
+  }
+  return formatShortDate(record.date)
+}
+
 function recordValue(record) {
   const metric = weightDetailMetric.value
   const value = getRecordMetric(record, metric)
@@ -2555,44 +2859,59 @@ function recordValue(record) {
 }
 
 function ensureWeightRecords() {
-  if (!Array.isArray(planState.weightRecords)) {
-    planState.weightRecords = []
-  }
+  planState.weightRecords = sanitizePlanWeightRecords(planState.weightRecords)
   if (planState.weightRecords.length) return
-  const startRecord = {
-    date: planState.weight.startDate || getTodayISO(),
-    weight: planState.weight.start,
-    bmi: calcBmi(planState.weight.start, planState.bodyMetrics.heightCm),
-    bodyFat: planState.bodyMetrics.bodyFat,
-    height: planState.bodyMetrics.heightCm
-  }
-  const currentRecord = {
-    date: getTodayISO(),
-    weight: planState.weight.current,
-    bmi: calcBmi(planState.weight.current, planState.bodyMetrics.heightCm),
-    bodyFat: planState.bodyMetrics.bodyFat,
-    height: planState.bodyMetrics.heightCm
-  }
-  planState.weightRecords = [startRecord, currentRecord]
+  planState.weightRecords = sanitizePlanWeightRecords([
+    buildPlanWeightRecord({
+      date: planState.weight.startDate || getTodayISO(),
+      weight: planState.weight.start,
+      bmi: calcBmi(planState.weight.start, planState.bodyMetrics.heightCm),
+      bodyFat: planState.bodyMetrics.bodyFat,
+      height: planState.bodyMetrics.heightCm
+    }),
+    buildPlanWeightRecord({
+      date: getTodayISO(),
+      weight: planState.weight.current,
+      bmi: calcBmi(planState.weight.current, planState.bodyMetrics.heightCm),
+      bodyFat: planState.bodyMetrics.bodyFat,
+      height: planState.bodyMetrics.heightCm
+    })
+  ])
 }
 
 function addOrUpdateWeightRecord() {
-  ensureWeightRecords()
   const date = getTodayISO()
-  const record = {
+  const record = buildPlanWeightRecord({
     date,
+    recordedAt: new Date().toISOString(),
     weight: planState.weight.current,
     bmi: calcBmi(planState.weight.current, planState.bodyMetrics.heightCm),
     bodyFat: planState.bodyMetrics.bodyFat,
     height: planState.bodyMetrics.heightCm
+  })
+  if (!record) {
+    planState.weightRecords = sanitizePlanWeightRecords(planState.weightRecords)
+    return
   }
-  const existingIndex = planState.weightRecords.findIndex((item) => item.date === date)
-  if (existingIndex >= 0) {
-    planState.weightRecords.splice(existingIndex, 1, record)
+  const nextRecords = sanitizePlanWeightRecords(planState.weightRecords)
+  const latest = nextRecords[nextRecords.length - 1]
+  const sameAsLatest =
+    latest &&
+    latest.date === record.date &&
+    Number(latest.weight) === Number(record.weight) &&
+    Number(latest.height ?? -1) === Number(record.height ?? -1) &&
+    Number(latest.bodyFat ?? -1) === Number(record.bodyFat ?? -1)
+  if (sameAsLatest) {
+    nextRecords.splice(nextRecords.length - 1, 1, {
+      ...latest,
+      bmi: record.bmi,
+      bodyFat: record.bodyFat,
+      height: record.height
+    })
   } else {
-    planState.weightRecords.push(record)
+    nextRecords.push(record)
   }
-  planState.weightRecords.sort((a, b) => (a.date > b.date ? 1 : -1))
+  planState.weightRecords = sanitizePlanWeightRecords(nextRecords)
 }
 
 function toNumber(value) {
@@ -2707,7 +3026,10 @@ watch(
     planState.bodyMetrics.heightCm,
     planState.bodyMetrics.bodyFat,
     weeklyWorkoutMinutes.value,
-    weeklyStrengthSets.value
+    weeklyStrengthSets.value,
+    onboardingAnswers.value?.frequency,
+    onboardingAnswers.value?.sessionDuration,
+    JSON.stringify(onboardingAnswers.value?.movementLimitations || [])
   ],
   () => {
     if (isWeightLoss.value) applyWeightLossRecommendations()
@@ -2908,6 +3230,70 @@ watch(
   text-align: center;
   display: grid;
   gap: 12px;
+}
+
+.onboarding-recommendation {
+  text-align: left;
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(255, 255, 255, 0.96)),
+    var(--surface);
+}
+
+.recommendation-head {
+  display: grid;
+  gap: 8px;
+}
+
+.recommendation-head h3,
+.recommendation-head p {
+  margin: 0;
+}
+
+.recommendation-head p {
+  color: var(--text-secondary);
+}
+
+.recommendation-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.recommendation-metrics,
+.recommendation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.recommendation-chip {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.recommendation-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 8px;
 }
 
 .goal-summary {

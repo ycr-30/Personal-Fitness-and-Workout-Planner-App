@@ -1,13 +1,19 @@
 import { supabase } from './supabaseClient'
+import {
+  DEFAULT_SESSION_DURATION,
+  DEFAULT_TRAINING_SETUP,
+  EXPERIENCE_VALUES,
+  FREQUENCY_VALUES,
+  GOAL_VALUES,
+  NUTRITION_VALUES,
+  SESSION_DURATION_VALUES,
+  TRAINING_SETUP_VALUES,
+  normalizeMovementLimitations
+} from './onboardingOptions'
 
-const EXPERIENCE_VALUES = new Set(['foundation', 'intermediate', 'advanced'])
-const GOAL_VALUES = new Set(['fat-loss', 'muscle-gain', 'performance'])
-const FREQUENCY_VALUES = new Set(['2-sessions', '3-4-sessions', '5-plus-sessions'])
-const NUTRITION_VALUES = new Set(['calorie-deficit', 'maintenance', 'calorie-surplus'])
-
-function normalizeChoice(value, allowed) {
+function normalizeChoice(value, allowed, fallback = '') {
   const normalized = String(value || '').trim()
-  return allowed.has(normalized) ? normalized : ''
+  return allowed.has(normalized) ? normalized : fallback
 }
 
 function normalizeCompletedAt(value) {
@@ -25,6 +31,19 @@ export function normalizeOnboardingAnswers(source = null) {
     goal: normalizeChoice(source.goal, GOAL_VALUES),
     frequency: normalizeChoice(source.frequency, FREQUENCY_VALUES),
     nutrition: normalizeChoice(source.nutrition, NUTRITION_VALUES),
+    trainingSetup: normalizeChoice(
+      source.trainingSetup ?? source.training_setup,
+      TRAINING_SETUP_VALUES,
+      DEFAULT_TRAINING_SETUP
+    ),
+    movementLimitations: normalizeMovementLimitations(
+      source.movementLimitations ?? source.movement_limitations
+    ),
+    sessionDuration: normalizeChoice(
+      source.sessionDuration ?? source.session_duration,
+      SESSION_DURATION_VALUES,
+      DEFAULT_SESSION_DURATION
+    ),
     completedAt: normalizeCompletedAt(source.completedAt || source.completed_at)
   }
 
@@ -41,6 +60,9 @@ function mapOnboardingRow(row) {
     goal: row?.goal,
     frequency: row?.frequency,
     nutrition: row?.nutrition,
+    training_setup: row?.training_setup,
+    movement_limitations: row?.movement_limitations,
+    session_duration: row?.session_duration,
     completed_at: row?.completed_at
   })
 }
@@ -55,6 +77,9 @@ function buildOnboardingPayload(answers, userId) {
     goal: normalized.goal,
     frequency: normalized.frequency,
     nutrition: normalized.nutrition,
+    training_setup: normalized.trainingSetup,
+    movement_limitations: normalized.movementLimitations,
+    session_duration: normalized.sessionDuration,
     completed_at: normalized.completedAt
   }
 }

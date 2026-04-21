@@ -339,16 +339,54 @@ const resetHint = ref(false) // 是否提示重置密码
 
 const REMEMBER_KEY = 'pf_remember_pref' // 记住登录偏好键
 const LAST_IDENTIFIER_KEY = 'pf_last_identifier' // 最近使用账号键
+const LAST_CREDENTIAL_KEY = 'pf_last_login_credential'
+
+function normalizeLoginIdentifier(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function readRememberedIdentifier() {
+  const storedIdentifier = String(localStorage.getItem(LAST_IDENTIFIER_KEY) || '').trim()
+  if (storedIdentifier) {
+    localStorage.removeItem(LAST_CREDENTIAL_KEY)
+    return storedIdentifier
+  }
+
+  try {
+    const raw = localStorage.getItem(LAST_CREDENTIAL_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      const migratedIdentifier = String(parsed?.identifier || '').trim()
+      if (migratedIdentifier) {
+        localStorage.setItem(LAST_IDENTIFIER_KEY, migratedIdentifier)
+      }
+      localStorage.removeItem(LAST_CREDENTIAL_KEY)
+      return migratedIdentifier
+    }
+  } catch (error) {
+    console.error('Failed to read remembered login identifier', error)
+  }
+
+  localStorage.removeItem(LAST_CREDENTIAL_KEY)
+  return ''
+}
+
 const storedPref = localStorage.getItem(REMEMBER_KEY)
 if (storedPref != null) form.remember = storedPref === 'true'
-const lastIdentifier = localStorage.getItem(LAST_IDENTIFIER_KEY)
-if (lastIdentifier) form.account = lastIdentifier
+const rememberedIdentifier = ref(readRememberedIdentifier())
+if (rememberedIdentifier.value) {
+  form.account = rememberedIdentifier.value
+}
 
 watch(
   () => form.remember,
   (val) => {
     localStorage.setItem(REMEMBER_KEY, String(val))
-    if (!val) localStorage.removeItem(LAST_IDENTIFIER_KEY)
+    if (!val) {
+      localStorage.removeItem(LAST_IDENTIFIER_KEY)
+      localStorage.removeItem(LAST_CREDENTIAL_KEY)
+      rememberedIdentifier.value = ''
+    }
   }
 )
 
@@ -357,6 +395,11 @@ watch(
   (val) => {
     if (form.remember) {
       localStorage.setItem(LAST_IDENTIFIER_KEY, val)
+    }
+    const currentIdentifier = normalizeLoginIdentifier(val)
+    const storedIdentifier = normalizeLoginIdentifier(rememberedIdentifier.value)
+    if (!currentIdentifier || currentIdentifier !== storedIdentifier) {
+      form.password = ''
     }
   }
 )
@@ -839,6 +882,16 @@ async function onSubmit() {
   }
   attempts.value = 0
   resetHint.value = false
+  if (form.remember) {
+    const trimmedIdentifier = form.account.trim()
+    localStorage.setItem(LAST_IDENTIFIER_KEY, trimmedIdentifier)
+    localStorage.removeItem(LAST_CREDENTIAL_KEY)
+    rememberedIdentifier.value = trimmedIdentifier
+  } else {
+    localStorage.removeItem(LAST_IDENTIFIER_KEY)
+    localStorage.removeItem(LAST_CREDENTIAL_KEY)
+    rememberedIdentifier.value = ''
+  }
   await syncLoginPreferencesToCloud(form.account)
   router.replace(resolvePostLoginTarget())
 }

@@ -48,7 +48,13 @@ import AppHeader from '@/components/AppHeader.vue'
 import FloatingCoachChat from '@/components/FloatingCoachChat.vue'
 import { useUserSettings } from '@/composables/useUserSettings'
 import { syncLocalDataToSupabase, hydrateLocalDataFromSupabase } from '@/lib/supabaseSync'
-import { applyCloudAppStateToLocal, fetchCloudAppState, saveLocalAppStateToCloud } from '@/lib/cloudStateApi'
+import {
+  applyCloudAppStateToLocal,
+  fetchCloudAppState,
+  getLocalAppStateMeta,
+  isCloudAppStateNewerThanLocal,
+  saveLocalAppStateToCloud
+} from '@/lib/cloudStateApi'
 import { getStableDeviceId, loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
 import { getIdentityFromUser, getUserStorageKey } from '@/lib/userStorage'
 
@@ -186,33 +192,43 @@ watch(
       localStorage.getItem(getUserStorageKey('pf_plan_state', auth.user)) ||
       localStorage.getItem(getUserStorageKey('pf_workout_logs', auth.user)) ||
       localStorage.getItem(getUserStorageKey('pf_rest_days', auth.user))
+    const localAppStateMeta = getLocalAppStateMeta(auth.user)
 
     let hydratedFromBackend = false
-    if (!hasLocalData) {
-      try {
-        const cloudState = await fetchCloudAppState()
-        const hasCloudData =
-          cloudState?.planState ||
-          (Array.isArray(cloudState?.workoutLogs) && cloudState.workoutLogs.length > 0) ||
-          (Array.isArray(cloudState?.restDays) && cloudState.restDays.length > 0)
-        if (hasCloudData) {
-          applyCloudAppStateToLocal(auth.user, cloudState)
-          hydratedFromBackend = true
-        }
-      } catch (error) {
-        console.error('Backend cloud hydrate failed', error)
-      }
+    let cloudState = null
+    let hasCloudData = false
+    let cloudShouldReplaceLocal = false
 
-      if (!hydratedFromBackend) {
-        try {
-          await hydrateLocalDataFromSupabase()
-        } catch (error) {
-          console.error('Cloud hydrate failed', error)
-        }
+    try {
+      cloudState = await fetchCloudAppState()
+      hasCloudData =
+        Boolean(cloudState?.planState) ||
+        (Array.isArray(cloudState?.workoutLogs) && cloudState.workoutLogs.length > 0) ||
+        (Array.isArray(cloudState?.restDays) && cloudState.restDays.length > 0)
+      cloudShouldReplaceLocal = hasCloudData && isCloudAppStateNewerThanLocal(cloudState, localAppStateMeta)
+    } catch (error) {
+      console.error('Backend cloud hydrate failed', error)
+    }
+
+    if (!hasLocalData) {
+      if (hasCloudData) {
+        applyCloudAppStateToLocal(auth.user, cloudState)
+        hydratedFromBackend = true
+      }
+    } else if (cloudShouldReplaceLocal) {
+      applyCloudAppStateToLocal(auth.user, cloudState)
+      hydratedFromBackend = true
+    }
+
+    if (!hasLocalData && !hydratedFromBackend) {
+      try {
+        await hydrateLocalDataFromSupabase()
+      } catch (error) {
+        console.error('Cloud hydrate failed', error)
       }
     }
 
-    if (hasLocalData && localStorage.getItem(backendKey) !== '1') {
+    if (hasLocalData && !hydratedFromBackend && localStorage.getItem(backendKey) !== '1') {
       try {
         await saveLocalAppStateToCloud(auth.user)
         localStorage.setItem(backendKey, '1')

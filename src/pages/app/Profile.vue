@@ -172,13 +172,25 @@
             <strong>{{ onboardingCopy.frequency[onboardingSummary.frequency] }}</strong>
           </div>
           <div class="summary-item">
+            <span>Training setup</span>
+            <strong>{{ onboardingCopy.trainingSetup[onboardingSummary.trainingSetup] }}</strong>
+          </div>
+          <div class="summary-item">
+            <span>Movement limitations</span>
+            <strong>{{ movementLimitationsDisplay }}</strong>
+          </div>
+          <div class="summary-item">
+            <span>Session length</span>
+            <strong>{{ onboardingCopy.sessionDuration[onboardingSummary.sessionDuration] }}</strong>
+          </div>
+          <div class="summary-item">
             <span>Nutrition outlook</span>
             <strong>{{ onboardingCopy.nutrition[onboardingSummary.nutrition] }}</strong>
           </div>
         </div>
         <p v-else class="section-note">
           No onboarding answers are saved yet. Add them if you want to keep a clear record of your original goal,
-          training background, and weekly rhythm.
+          training background, setup constraints, and weekly rhythm.
         </p>
         <p class="section-note compact">
           Once you build enough real workout history, plan tuning should rely more on your body metrics and logged
@@ -193,6 +205,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUserProfile } from '@/composables/useUserProfile'
+import { formatMovementLimitationLabels, onboardingLabelMaps } from '@/lib/onboardingOptions'
 
 const auth = useAuthStore()
 const {
@@ -543,28 +556,18 @@ function setSex(value) {
 }
 
 const onboardingSummary = computed(() => auth.user?.onboarding?.answers || null)
+const movementLimitationsDisplay = computed(() => {
+  const values = onboardingSummary.value?.movementLimitations || []
+  return formatMovementLimitationLabels(values).join(', ')
+})
 
 const onboardingCopy = {
-  experience: {
-    foundation: 'Foundation phase',
-    intermediate: 'Training consistently',
-    advanced: 'Performance focused'
-  },
-  goal: {
-    'fat-loss': 'Lean and athletic',
-    'muscle-gain': 'Build muscle density',
-    performance: 'Raise performance ceiling'
-  },
-  frequency: {
-    '2-sessions': '2 sessions per week',
-    '3-4-sessions': '3-4 sessions per week',
-    '5-plus-sessions': '5+ sessions per week'
-  },
-  nutrition: {
-    'calorie-deficit': 'Strategic deficit',
-    maintenance: 'Maintenance',
-    'calorie-surplus': 'Lean surplus'
-  }
+  experience: onboardingLabelMaps.experience,
+  goal: onboardingLabelMaps.goal,
+  frequency: onboardingLabelMaps.frequency,
+  trainingSetup: onboardingLabelMaps.trainingSetup,
+  sessionDuration: onboardingLabelMaps.sessionDuration,
+  nutrition: onboardingLabelMaps.nutrition
 }
 
 onMounted(() => {

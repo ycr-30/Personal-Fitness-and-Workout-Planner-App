@@ -100,10 +100,11 @@ function pickUserSnapshot(record) {
     record.onboardingCompleted ??
     record.onboarding?.completed ??
     false
-  const answers =
+  const rawAnswers =
     record.onboardingAnswers ??
     record.onboarding?.answers ??
     null
+  const answers = rawAnswers ? normalizeOnboardingAnswers(rawAnswers) || rawAnswers : null
   rest.onboarding = { completed, answers }
   return rest
 }

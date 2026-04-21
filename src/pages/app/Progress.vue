@@ -830,6 +830,7 @@ import { useAuthStore } from '@/stores/auth'
 import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
 import { getUserStorageKey } from '@/lib/userStorage'
+import { sanitizePlanWeightRecords } from '@/lib/planWeightRecords'
 
 const CALORIES_PER_MINUTE = 6
 const DAY_MS = 86400000
@@ -1356,7 +1357,7 @@ function loadPlan() {
     next.selectedChallenges = Array.isArray(data?.selectedChallenges) ? data.selectedChallenges : []
     next.weight = { ...next.weight, ...(data?.weight || {}) }
     next.bodyMetrics = { ...next.bodyMetrics, ...(data?.bodyMetrics || {}) }
-    next.weightRecords = Array.isArray(data?.weightRecords) ? data.weightRecords : []
+    next.weightRecords = sanitizePlanWeightRecords(data?.weightRecords)
     next.dailyLogs = data?.dailyLogs || {}
     next.bodyCircumferenceLog = {
       ...next.bodyCircumferenceLog,
@@ -3466,6 +3467,11 @@ const analyticsSummary = computed(() => ({
     primary: String(auth.user?.onboarding?.answers?.goal || '').trim(),
     experience: String(auth.user?.onboarding?.answers?.experience || '').trim(),
     frequency: String(auth.user?.onboarding?.answers?.frequency || '').trim(),
+    trainingSetup: String(auth.user?.onboarding?.answers?.trainingSetup || '').trim(),
+    movementLimitations: Array.isArray(auth.user?.onboarding?.answers?.movementLimitations)
+      ? auth.user.onboarding.answers.movementLimitations
+      : [],
+    sessionDuration: String(auth.user?.onboarding?.answers?.sessionDuration || '').trim(),
     nutrition: String(auth.user?.onboarding?.answers?.nutrition || '').trim()
   },
   challenges: challengeCards.value.map((item) => ({

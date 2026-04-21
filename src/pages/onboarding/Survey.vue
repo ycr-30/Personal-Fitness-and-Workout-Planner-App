@@ -8,7 +8,7 @@
           {{
             isEditMode
               ? 'Refresh your starting preferences if your first survey answers were too rough or no longer fit your goals.'
-              : 'Answer a handful of questions so we can recommend the right focus, cadence, and nutrition prompts.'
+              : 'Answer a handful of questions so we can recommend the right focus, cadence, setup, and nutrition prompts.'
           }}
         </p>
         <div v-if="isEditMode" class="header-actions">
@@ -60,8 +60,55 @@
         </fieldset>
 
         <fieldset class="group">
-          <legend>Nutrition outlook</legend>
-          <p class="hint">What best describes how you’d like to approach fueling?</p>
+          <legend>Training setup</legend>
+          <p class="hint">What setup do you reliably have access to for most sessions?</p>
+          <div class="options">
+            <label v-for="option in trainingSetupOptions" :key="option.value" class="option">
+              <input v-model="form.trainingSetup" type="radio" name="trainingSetup" :value="option.value" />
+              <span class="label">
+                <strong>{{ option.title }}</strong>
+                <span>{{ option.caption }}</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="group">
+          <legend>Movement limitations</legend>
+          <p class="hint">Select all that apply so early training recommendations stay realistic and conservative.</p>
+          <div class="options">
+            <label v-for="option in movementLimitationOptions" :key="option.value" class="option">
+              <input
+                type="checkbox"
+                name="movementLimitations"
+                :checked="form.movementLimitations.includes(option.value)"
+                @change="toggleMovementLimitation(option.value, $event.target.checked)"
+              />
+              <span class="label">
+                <strong>{{ option.title }}</strong>
+                <span>{{ option.caption }}</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="group">
+          <legend>Session length</legend>
+          <p class="hint">What is a realistic single-session training window for you right now?</p>
+          <div class="options">
+            <label v-for="option in sessionDurationOptions" :key="option.value" class="option">
+              <input v-model="form.sessionDuration" type="radio" name="sessionDuration" :value="option.value" />
+              <span class="label">
+                <strong>{{ option.title }}</strong>
+                <span>{{ option.caption }}</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="group">
+          <legend>Nutrition goal</legend>
+          <p class="hint">Which one fits you best right now?</p>
           <div class="options">
             <label v-for="option in nutritionOptions" :key="option.value" class="option">
               <input v-model="form.nutrition" type="radio" name="nutrition" :value="option.value" />
@@ -85,88 +132,27 @@
 import { computed, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import {
+  experienceOptions,
+  frequencyOptions,
+  goalOptions,
+  movementLimitationOptions,
+  nutritionOptions,
+  sessionDurationOptions,
+  trainingSetupOptions
+} from '@/lib/onboardingOptions'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 
-// 体验调查的选项（采用专业语气引导用户完成）
-const experienceOptions = [
-  {
-    value: 'foundation',
-    title: 'Foundation phase',
-    caption: 'New to structured coaching, ready to learn key lifts and training language.'
-  },
-  {
-    value: 'intermediate',
-    title: 'Training consistently',
-    caption: 'Comfortable with major movements, want sharper programming and feedback.'
-  },
-  {
-    value: 'advanced',
-    title: 'Performance focused',
-    caption: 'Years of consistent training and looking for advanced progression models.'
-  }
-]
-
-const goalOptions = [
-  {
-    value: 'fat-loss',
-    title: 'Lean and athletic',
-    caption: 'Prioritise fat loss while protecting strength and performance.'
-  },
-  {
-    value: 'muscle-gain',
-    title: 'Build muscle density',
-    caption: 'Structured hypertrophy blocks with enough recovery to grow.'
-  },
-  {
-    value: 'performance',
-    title: 'Raise performance ceiling',
-    caption: 'Blend strength, conditioning, and mobility for a complete engine.'
-  }
-]
-
-const frequencyOptions = [
-  {
-    value: '2-sessions',
-    title: '2 sessions / week',
-    caption: 'Balanced progress alongside a busy calendar.'
-  },
-  {
-    value: '3-4-sessions',
-    title: '3–4 sessions / week',
-    caption: 'Sweet spot for most strength and body composition goals.'
-  },
-  {
-    value: '5-plus-sessions',
-    title: '5+ sessions / week',
-    caption: 'High frequency, best with dedicated recovery practices.'
-  }
-]
-
-const nutritionOptions = [
-  {
-    value: 'calorie-deficit',
-    title: 'Strategic deficit',
-    caption: 'Measured energy deficit paired with high-quality protein.'
-  },
-  {
-    value: 'maintenance',
-    title: 'Maintenance',
-    caption: 'Hold weight steady while elevating performance metrics.'
-  },
-  {
-    value: 'calorie-surplus',
-    title: 'Lean surplus',
-    caption: 'Slight surplus to support muscle gain without unnecessary fat gain.'
-  }
-]
-
 const form = reactive({
   experience: '',
   goal: '',
   frequency: '',
+  trainingSetup: '',
+  movementLimitations: [],
+  sessionDuration: '',
   nutrition: ''
 })
 
@@ -183,14 +169,41 @@ watch(
     form.experience = answers.experience || ''
     form.goal = answers.goal || ''
     form.frequency = answers.frequency || ''
+    form.trainingSetup = answers.trainingSetup || ''
+    form.movementLimitations = Array.isArray(answers.movementLimitations) ? [...answers.movementLimitations] : []
+    form.sessionDuration = answers.sessionDuration || ''
     form.nutrition = answers.nutrition || ''
   },
   { immediate: true }
 )
 
 const isComplete = computed(
-  () => form.experience && form.goal && form.frequency && form.nutrition
+  () =>
+    form.experience &&
+    form.goal &&
+    form.frequency &&
+    form.trainingSetup &&
+    form.movementLimitations.length &&
+    form.sessionDuration &&
+    form.nutrition
 )
+
+function toggleMovementLimitation(value, checked) {
+  const next = new Set(form.movementLimitations)
+  if (checked) {
+    if (value === 'none') {
+      form.movementLimitations = ['none']
+      return
+    }
+    next.delete('none')
+    next.add(value)
+    form.movementLimitations = [...next]
+    return
+  }
+
+  next.delete(value)
+  form.movementLimitations = next.size ? [...next] : ['none']
+}
 
 async function submit() {
   if (!isComplete.value) return

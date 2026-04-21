@@ -1,5 +1,8 @@
 import { getUserStorageKey } from './userStorage'
 import { buildAuthServerUrl } from './authServerOrigin'
+import { sanitizePlanStateSnapshot } from './planWeightRecords'
+
+const APP_STATE_META_STORAGE_KEY = 'pf_app_state_meta'
 
 function readJson(key, fallback) {
   try {
@@ -11,9 +14,57 @@ function readJson(key, fallback) {
   }
 }
 
+function getAppStateMetaKey(user) {
+  return getUserStorageKey(APP_STATE_META_STORAGE_KEY, user)
+}
+
+function normalizeUpdatedAt(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString()
+}
+
+function getUpdatedAtTime(value) {
+  const normalized = normalizeUpdatedAt(value)
+  return normalized ? new Date(normalized).getTime() : 0
+}
+
+function writeLocalAppStateMeta(user, updatedAt) {
+  if (!user || typeof window === 'undefined') return
+  const metaKey = getAppStateMetaKey(user)
+  const normalizedUpdatedAt = normalizeUpdatedAt(updatedAt)
+  if (!normalizedUpdatedAt) {
+    localStorage.removeItem(metaKey)
+    return
+  }
+  localStorage.setItem(
+    metaKey,
+    JSON.stringify({
+      updatedAt: normalizedUpdatedAt
+    })
+  )
+}
+
+export function getLocalAppStateMeta(user) {
+  if (!user || typeof window === 'undefined') return null
+  const meta = readJson(getAppStateMetaKey(user), null)
+  const updatedAt = normalizeUpdatedAt(meta?.updatedAt)
+  return updatedAt ? { updatedAt } : null
+}
+
+export function isCloudAppStateNewerThanLocal(appState, localMeta) {
+  const cloudTime = getUpdatedAtTime(appState?.updatedAt)
+  const localTime = getUpdatedAtTime(localMeta?.updatedAt)
+  if (!cloudTime) return false
+  if (!localTime) return true
+  return cloudTime > localTime
+}
+
 export function getLocalAppState(user) {
   return {
-    planState: readJson(getUserStorageKey('pf_plan_state', user), null),
+    planState: sanitizePlanStateSnapshot(readJson(getUserStorageKey('pf_plan_state', user), null)),
     workoutLogs: readJson(getUserStorageKey('pf_workout_logs', user), []),
     restDays: readJson(getUserStorageKey('pf_rest_days', user), [])
   }
@@ -38,13 +89,14 @@ export function applyCloudAppStateToLocal(user, appState) {
   const restKey = getUserStorageKey('pf_rest_days', user)
 
   if (appState.planState && typeof appState.planState === 'object') {
-    localStorage.setItem(planKey, JSON.stringify(appState.planState))
+    localStorage.setItem(planKey, JSON.stringify(sanitizePlanStateSnapshot(appState.planState)))
   } else {
     localStorage.removeItem(planKey)
   }
 
   localStorage.setItem(logsKey, JSON.stringify(Array.isArray(appState.workoutLogs) ? appState.workoutLogs : []))
   localStorage.setItem(restKey, JSON.stringify(Array.isArray(appState.restDays) ? appState.restDays : []))
+  writeLocalAppStateMeta(user, appState.updatedAt)
 
   window.dispatchEvent(new Event('pf_plan_updated'))
   window.dispatchEvent(new Event('pf_logs_updated'))
@@ -66,5 +118,6 @@ export async function saveLocalAppStateToCloud(user) {
   if (!response.ok) {
     throw new Error(payload?.error || 'Failed to save cloud app state.')
   }
+  writeLocalAppStateMeta(user, payload?.appState?.updatedAt)
   return payload?.appState || null
 }

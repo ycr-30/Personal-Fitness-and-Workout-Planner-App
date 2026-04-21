@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { sanitizePlanStateSnapshot, sanitizePlanWeightRecords } from '@/lib/planWeightRecords'
 import { supabase } from '@/lib/supabaseClient'
 import { getUserStorageKey } from '@/lib/userStorage'
 
@@ -67,8 +68,8 @@ function readPlanFallback(authUser = null) {
   try {
     const raw = window.localStorage.getItem(getUserStorageKey('pf_plan_state', authUser))
     if (!raw) return null
-    const parsed = JSON.parse(raw)
-    const weightRecords = Array.isArray(parsed?.weightRecords) ? parsed.weightRecords : []
+    const parsed = sanitizePlanStateSnapshot(JSON.parse(raw)) || {}
+    const weightRecords = sanitizePlanWeightRecords(parsed?.weightRecords)
     const weightCandidates = weightRecords
       .map((item) => normalizeNumericField(item?.weight))
       .filter((value) => value !== '' && value > 0)

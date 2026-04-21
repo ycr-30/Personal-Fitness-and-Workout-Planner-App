@@ -691,13 +691,43 @@ async function confirmVerification() {
   padding: 14px 16px;
   font-size: 15px;
   background: rgba(255, 255, 255, 0.8);
+  color: #1d1d1f;
+  -webkit-text-fill-color: #1d1d1f;
+  caret-color: #1d1d1f;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.field input::placeholder {
+  color: #8e8e93;
+  -webkit-text-fill-color: #8e8e93;
 }
 
 .field input:focus {
   border-color: #0071e3;
   box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.15);
   outline: none;
+}
+
+.field input:disabled,
+.field input:read-only {
+  color: #1d1d1f;
+  -webkit-text-fill-color: #1d1d1f;
+  opacity: 1;
+}
+
+.field input:disabled {
+  background: rgba(168, 178, 198, 0.32);
+}
+
+.field input:-webkit-autofill,
+.field input:-webkit-autofill:hover,
+.field input:-webkit-autofill:focus,
+.field input:-webkit-autofill:active {
+  -webkit-text-fill-color: #1d1d1f;
+  caret-color: #1d1d1f;
+  transition: background-color 9999s ease-out 0s;
+  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.96) inset;
+  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.96) inset;
 }
 
 .helper {

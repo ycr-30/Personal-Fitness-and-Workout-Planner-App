@@ -655,6 +655,12 @@ import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { supabase } from '@/lib/supabaseClient'
 import { formatSupabaseError, mapMealEntryRow, mapWaterEntryRow, requireNutritionUser } from '@/lib/nutritionSupabase'
 import { buildFallbackNutritionTargetRecommendation } from '@/lib/nutritionGoalSync'
+import {
+  getPlanWeightRecordTime,
+  hasValidPlanWeight,
+  sanitizePlanStateSnapshot,
+  sanitizePlanWeightRecords
+} from '@/lib/planWeightRecords'
 import { getUserStorageKey } from '@/lib/userStorage'
 import { buildNutritionSummary } from '@/utils/nutritionCalculations'
 import { buildPlanGoalLink } from '@/utils/nutritionGoalMapping'
@@ -1377,11 +1383,16 @@ function buildWeeklyWeightSeries(records, fallbackWeight, rangeDays = 30) {
     ? records
         .map((record) => ({
           date: parseLocalDate(record.date),
+          time: getPlanWeightRecordTime(record),
           weight: Number(record.weight)
         }))
-        .filter((record) => record.date && Number.isFinite(record.weight))
-        .sort((a, b) => a.date - b.date)
+        .filter((record) => record.date && hasValidPlanWeight(record.weight))
+        .sort((a, b) => a.time - b.time)
     : []
+
+  if (sorted.length && sorted.length <= 4) {
+    return sorted.map((record) => Number(record.weight.toFixed(1)))
+  }
 
   sorted.forEach((record) => {
     if (record.date < start || record.date > today) return
@@ -1405,6 +1416,33 @@ function buildWeeklyWeightSeries(records, fallbackWeight, rangeDays = 30) {
   })
 }
 
+function buildVisibleWeightLabels(records, rangeDays = 30) {
+  const sorted = Array.isArray(records)
+    ? records
+        .slice()
+        .sort((a, b) => getPlanWeightRecordTime(a) - getPlanWeightRecordTime(b))
+    : []
+  if (sorted.length && sorted.length <= 4) {
+    const duplicateDates = new Set(
+      sorted
+        .map((record) => String(record?.date || '').trim())
+        .filter((date, index, list) => date && list.indexOf(date) !== index)
+    )
+    return sorted.map((record) => {
+      const date = parseLocalDate(record?.date)
+      if (!date) return '--'
+      if (duplicateDates.has(record?.date) && record?.recordedAt) {
+        const recordedAt = new Date(record.recordedAt)
+        if (!Number.isNaN(recordedAt.getTime())) {
+          return `${String(recordedAt.getHours()).padStart(2, '0')}:${String(recordedAt.getMinutes()).padStart(2, '0')}`
+        }
+      }
+      return `${date.getMonth() + 1}/${date.getDate()}`
+    })
+  }
+  return getWeekLabels(rangeDays)
+}
+
 function buildWeightChart(values) {
   const width = 520
   const height = 180
@@ -1413,14 +1451,16 @@ function buildWeightChart(values) {
   const paddingLeft = 12
   const paddingRight = 12
   const usableHeight = height - paddingTop - paddingBottom
-  const min = Math.min(...values)
-  const max = Math.max(...values)
+  const actualMin = Math.min(...values)
+  const actualMax = Math.max(...values)
+  const min = actualMin === actualMax ? actualMin - 0.5 : actualMin
+  const max = actualMin === actualMax ? actualMax + 0.5 : actualMax
   const range = max - min || 1
   const usableWidth = width - paddingLeft - paddingRight
-  const step = values.length > 1 ? usableWidth / (values.length - 1) : usableWidth
+  const step = values.length > 1 ? usableWidth / (values.length - 1) : 0
 
   const points = values.map((value, index) => {
-    const x = paddingLeft + index * step
+    const x = values.length === 1 ? paddingLeft + usableWidth / 2 : paddingLeft + index * step
     const y = paddingTop + (1 - (value - min) / range) * usableHeight
     return { x, y }
   })
@@ -1550,10 +1590,10 @@ function loadPlan() {
     return
   }
   try {
-    const data = JSON.parse(raw)
+    const data = sanitizePlanStateSnapshot(JSON.parse(raw)) || {}
     planState.value = {
       weight: data?.weight || { current: 0 },
-      weightRecords: Array.isArray(data?.weightRecords) ? data.weightRecords : []
+      weightRecords: sanitizePlanWeightRecords(data?.weightRecords)
     }
   } catch (err) {
     console.error('Failed to parse plan', err)
@@ -1740,7 +1780,7 @@ const dashboardNutritionSummary = computed(() =>
 
 const weightRecordsSorted = computed(() => {
   const records = Array.isArray(planState.value.weightRecords) ? planState.value.weightRecords : []
-  return records.slice().sort((a, b) => (a.date > b.date ? 1 : -1))
+  return records.slice().sort((a, b) => getPlanWeightRecordTime(a) - getPlanWeightRecordTime(b))
 })
 
 const hasWeightData = computed(() => {
@@ -1793,7 +1833,7 @@ const weightChart = computed(() => {
 const weightChartAxis = computed(() => {
   const labels = getAxisLabels(weightChart.value.min, weightChart.value.max)
   const rangeDays = weightRangeOptions.find((item) => item.value === weightRange.value)?.days || 30
-  const xLabels = getWeekLabels(rangeDays)
+  const xLabels = buildVisibleWeightLabels(visibleWeightRecords.value, rangeDays)
   return { yLabels: labels, xLabels }
 })
 
