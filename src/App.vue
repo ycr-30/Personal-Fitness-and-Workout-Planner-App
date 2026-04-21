@@ -20,6 +20,14 @@
       </main>
     </div>
     <main v-else class="app-main compact">
+      <div v-if="suppressProtectedRouteContent" class="route-loading route-loading-compact" aria-hidden="true">
+        <div class="route-loading-card">
+          <div class="route-loading-line route-loading-title"></div>
+          <div class="route-loading-line"></div>
+          <div class="route-loading-line route-loading-short"></div>
+        </div>
+      </div>
+      <template v-else>
       <RouterView v-slot="{ Component }">
         <Suspense>
           <component :is="Component" />
@@ -34,6 +42,7 @@
           </template>
         </Suspense>
       </RouterView>
+      </template>
     </main>
 
     <FloatingCoachChat v-if="showCoachChat" />
@@ -66,6 +75,7 @@ const hideShell = computed(() => route.meta?.hideShell)
 const isPublicGuestRoute = computed(() => route.meta?.publicGuestRoute === true)
 const showShell = computed(() => auth.isAuthed && !hideShell.value)
 const showCoachChat = computed(() => showShell.value && !isPublicGuestRoute.value)
+const suppressProtectedRouteContent = computed(() => !auth.isAuthed && route.meta?.requiresAuth === true)
 const systemTheme = ref('light')
 const syncInProgress = ref(false)
 const syncTimer = ref(null)

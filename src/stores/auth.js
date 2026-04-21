@@ -145,13 +145,19 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null, // 已登录用户快照
     loading: false,
-    error: null
+    error: null,
+    authTransition: ''
   }),
   getters: {
     isAuthed: (state) => !!state.user,
-    avatar: (state) => state.user?.avatar || ''
+    avatar: (state) => state.user?.avatar || '',
+    isLoggingOut: (state) => state.authTransition === 'logout'
   },
   actions: {
+    beginLogoutTransition() {
+      this.authTransition = 'logout'
+    },
+
     init() {
       const key = localStorage.getItem(CURRENT_KEY)
       if (!key) return
@@ -816,6 +822,7 @@ export const useAuthStore = defineStore('auth', {
       clearCurrentAuthSnapshot(this)
       lastServerHydrateAt = 0
       this.error = null
+      this.authTransition = ''
     },
 
     async rollbackSupabaseAuthState(message = '') {
@@ -837,6 +844,7 @@ export const useAuthStore = defineStore('auth', {
       clearCurrentAuthSnapshot(this)
       lastServerHydrateAt = 0
       this.error = message || null
+      this.authTransition = ''
       return false
     },
 

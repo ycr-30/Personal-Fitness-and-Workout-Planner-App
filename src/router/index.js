@@ -161,9 +161,16 @@ router.beforeEach(async (to, from, next) => {
   const isOnboardingEdit = to.name === 'onboarding' && String(to.query.edit || '') === '1'
   const isRecoveryRoute = to.name === 'login' && String(to.query.mode || '') === 'recovery'
   const isPublicInfoPage = to.meta?.publicInfoPage === true
+  const isLoggingOut = auth.isLoggingOut
   const shouldHydrateAuth = Boolean(to.meta.requiresAuth || to.meta.guestOnly || auth.user)
 
   if (!auth.user) auth.init()
+  if (isLoggingOut) {
+    if (to.meta.requiresAuth) {
+      return next({ name: 'login' })
+    }
+    return next()
+  }
   if (shouldHydrateAuth) {
     await auth.hydrateFromServer({
       maxAgeMs: to.meta.requiresAuth ? 60000 : 30000

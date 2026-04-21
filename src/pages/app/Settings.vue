@@ -724,11 +724,9 @@ async function submitDeleteAccount() {
     deleteState.tone = 'success'
     deleteState.message = 'Account deleted successfully.'
     closeDeleteModal()
-    if (supabase) {
-      await supabase.auth.signOut()
-    }
+    auth.beginLogoutTransition()
+    await router.replace({ name: 'login' })
     await auth.logout()
-    router.replace({ name: 'login' })
   } catch (err) {
     deleteState.tone = 'error'
     deleteState.message = err?.message || 'Unable to delete account.'
