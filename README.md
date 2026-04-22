@@ -89,6 +89,38 @@ Fitness-project/
 
 ## Local Development
 
+### Quick Reproduction Guide
+
+For supervisor / examiner local reproduction, the startup commands should be documented explicitly.
+
+Recommended local startup flow:
+
+1. Open a terminal in the project root:
+
+```bash
+cd Fitness-project
+npm install
+npm run dev
+```
+
+2. Open a second terminal for the API server:
+
+```bash
+cd Fitness-project/server
+npm install
+npm run dev
+```
+
+3. Open the app in the browser:
+
+- Frontend: `http://localhost:5173`
+- API server: `http://localhost:4000`
+
+If the supervisor only needs to review the final system behavior, the deployed version can be used directly:
+
+- Frontend: `https://www.keepfit.it.com/`
+- Auth / API server: `https://api.keepfit.it.com`
+
 ### 1. Install dependencies
 
 Install frontend dependencies from the project root:
@@ -142,6 +174,13 @@ If Google login, email verification, or AI features are enabled, the following s
 - `AI_CHAT_API_URL`
 - `AI_CHAT_API_KEY`
 
+Important note for AI reproduction:
+
+- The AI service currently depends on a RunPod-hosted machine.
+- If that RunPod machine is deleted or recreated, `AI_CHAT_API_URL` may change.
+- If the AI feature does not open or respond during reproduction, first check the latest GitHub version of this project and update the backend `.env` accordingly.
+- For any future maintenance or reproduction after handover, treat the latest GitHub repository state as the primary source of truth for AI endpoint updates.
+
 ### 3. Start the project
 
 Start the frontend development server:
@@ -161,6 +200,19 @@ Default local addresses:
 
 - Frontend: `http://localhost:5173`
 - Server: `http://localhost:4000`
+
+### 4. Handover Notes
+
+For supervisor, examiner, or future-maintainer reproduction, the following handover notes should be read together with the startup steps above:
+
+- Use `Node.js 20.x` for local reproduction.
+- Prepare the required `.env` files before starting either the frontend or backend.
+- Run the frontend from the project root and the backend from `Fitness-project/server` in two separate terminals.
+- Confirm whether the Supabase schema and seed data already exist, or whether the SQL files in `supabase/` must be executed first.
+- Google OAuth is optional for evaluation unless that specific sign-in path is being tested.
+- The AI service depends on a RunPod-hosted machine, so `AI_CHAT_API_URL` is not guaranteed to stay constant over time.
+- If the RunPod machine is deleted, recreated, or replaced, update the backend `.env` with the current `AI_CHAT_API_URL` before testing AI features.
+- If the AI chat endpoint stops working in a later reproduction, use the latest GitHub repository version as the primary reference for endpoint updates and deployment notes.
 
 ## Available Scripts
 

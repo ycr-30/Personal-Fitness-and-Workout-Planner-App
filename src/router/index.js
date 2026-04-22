@@ -133,8 +133,8 @@ const routes = [
       pageDescription: 'Completing secure sign-in.'
     }
   },
-  { path: '/onboarding', name: 'onboarding', component: Onboarding, meta: { requiresAuth: true, hideShell: true } }, // 登录后信息调查
-  { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { requiresAuth: true } }, // 登录后主页
+  { path: '/onboarding', name: 'onboarding', component: Onboarding, meta: { requiresAuth: true, hideShell: true } }, // Post-sign-in onboarding
+  { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { requiresAuth: true } }, // Main authenticated home
   { path: '/schedule', name: 'schedule', component: Schedule, meta: { requiresAuth: true } },
   { path: '/plan', name: 'plan', component: Plans, meta: { requiresAuth: true } },
   { path: '/plans', redirect: '/plan' },
@@ -144,7 +144,7 @@ const routes = [
   { path: '/muscle-map', name: 'muscle-map', component: MuscleMap, meta: { requiresAuth: true } },
   { path: '/profile', name: 'profile', component: Profile, meta: { requiresAuth: true } },
   { path: '/settings', name: 'settings', component: Settings, meta: { requiresAuth: true } },
-  // 兜底：未知路径 → 主页
+  // Fallback: route unknown paths to the landing page
   { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
 

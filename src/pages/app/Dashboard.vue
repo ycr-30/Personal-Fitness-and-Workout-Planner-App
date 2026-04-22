@@ -964,27 +964,27 @@ const agentStats = ref(createEmptyAgentStats())
 const visibleLogs = computed(() => getVisibleWorkoutLogs(logs.value, restDays.value))
 const locationSuggestions = computed(() => buildWorkoutLocationSuggestions(visibleLogs.value))
 const muscleGroupOptions = [
-  { value: 'Chest', label: 'Chest 胸' },
-  { value: 'Back', label: 'Back 背' },
-  { value: 'Legs', label: 'Legs 腿' },
-  { value: 'Shoulders', label: 'Shoulders 肩' },
-  { value: 'Biceps', label: 'Biceps 二头' },
-  { value: 'Triceps', label: 'Triceps 三头' },
-  { value: 'Core', label: 'Core 核心' },
-  { value: 'Cardio', label: 'Cardio 有氧' },
-  { value: 'Glutes', label: 'Glutes 臀' },
-  { value: 'Hamstrings', label: 'Hamstrings 腘绳肌' },
-  { value: 'Quads', label: 'Quads 股四头' },
-  { value: 'Calves', label: 'Calves 小腿' },
-  { value: 'Lower Back', label: 'Lower Back 下背' },
-  { value: 'Upper Back', label: 'Upper Back 上背' },
-  { value: 'Rear Delts', label: 'Rear Delts 后束' },
-  { value: 'Traps', label: 'Traps 斜方肌' },
-  { value: 'Forearms', label: 'Forearms 前臂' },
-  { value: 'Arms', label: 'Arms 手臂' },
-  { value: 'Grip', label: 'Grip 握力' },
-  { value: 'Full Body', label: 'Full Body 全身' },
-  { value: 'Plyometrics', label: 'Plyometrics 爆发力' }
+  { value: 'Chest', label: 'Chest' },
+  { value: 'Back', label: 'Back' },
+  { value: 'Legs', label: 'Legs' },
+  { value: 'Shoulders', label: 'Shoulders' },
+  { value: 'Biceps', label: 'Biceps' },
+  { value: 'Triceps', label: 'Triceps' },
+  { value: 'Core', label: 'Core' },
+  { value: 'Cardio', label: 'Cardio' },
+  { value: 'Glutes', label: 'Glutes' },
+  { value: 'Hamstrings', label: 'Hamstrings' },
+  { value: 'Quads', label: 'Quads' },
+  { value: 'Calves', label: 'Calves' },
+  { value: 'Lower Back', label: 'Lower Back' },
+  { value: 'Upper Back', label: 'Upper Back' },
+  { value: 'Rear Delts', label: 'Rear Delts' },
+  { value: 'Traps', label: 'Traps' },
+  { value: 'Forearms', label: 'Forearms' },
+  { value: 'Arms', label: 'Arms' },
+  { value: 'Grip', label: 'Grip' },
+  { value: 'Full Body', label: 'Full Body' },
+  { value: 'Plyometrics', label: 'Plyometrics' }
 ]
 
 const workoutNames = [

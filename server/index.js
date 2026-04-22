@@ -1716,8 +1716,7 @@ function appendSourcesBlock(content, ragChunks, options = {}) {
   const body = normalizeMessageText(content)
   const sources = formatRagSources(ragChunks)
   if (!sources.length) return body
-  const language = options.language || detectRequestLanguage(body)
-  const sourcesLabel = language === 'zh' ? '来源' : 'Sources'
+  const sourcesLabel = 'Sources'
   return `${body}\n\n${sourcesLabel}:\n${sources.join('\n')}`
 }
 
@@ -1748,22 +1747,6 @@ function buildUserProfileText(user) {
 
 function buildTemporaryUnavailableMessage({ language, intent, ragAvailable }) {
   const scopedIntent = intent === 'nutrition' ? 'nutrition' : intent === 'workout' ? 'workout' : 'both'
-  if (language === 'zh') {
-    if (scopedIntent === 'nutrition') {
-      return ragAvailable
-        ? '饮食教练暂时不可用。我已经检索到相关资料，但当前无法稳定生成正式回答。请稍后再试；你也可以补充目标、时间范围、忌口和预算，我恢复后会按饮食部分整理。'
-        : '饮食教练暂时不可用，请稍后再试。你也可以补充目标、时间范围、忌口和预算，我恢复后会按饮食部分整理。'
-    }
-    if (scopedIntent === 'workout') {
-      return ragAvailable
-        ? '训练教练暂时不可用。我已经检索到相关资料，但当前无法稳定生成正式回答。请稍后再试；你也可以补充训练目标、每周频率、器械条件和伤病限制，我恢复后会按训练部分整理。'
-        : '训练教练暂时不可用，请稍后再试。你也可以补充训练目标、每周频率、器械条件和伤病限制，我恢复后会按训练部分整理。'
-    }
-    return ragAvailable
-      ? '智能教练暂时不可用。我已经检索到相关资料，但当前无法稳定生成正式回答。请稍后再试；你也可以分别说明训练目标和饮食目标，我恢复后会分开整理。'
-      : '智能教练暂时不可用，请稍后再试。你也可以分别说明训练目标和饮食目标，我恢复后会分开整理。'
-  }
-
   if (scopedIntent === 'nutrition') {
     return ragAvailable
       ? 'The nutrition coach is temporarily unavailable. I found related reference material, but I cannot turn it into a stable final answer right now. Please try again shortly, or add your goal, time frame, dietary preferences, and restrictions so I can build the meal plan when the service recovers.'

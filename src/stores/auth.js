@@ -4,9 +4,9 @@ import { supabase } from '@/lib/supabaseClient'
 import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { loadUserOnboardingAnswers, normalizeOnboardingAnswers, saveUserOnboardingAnswers } from '@/lib/userOnboardingCloud'
 
-const USERS_KEY = 'pf_users' // 所有注册用户（原型阶段使用浏览器本地存储）
-const CURRENT_KEY = 'pf_current_user' // 当前登录用户的账号键
-const EMAIL_PATTERN = /^\S+@\S+\.\S+$/ // 邮箱格式校验
+const USERS_KEY = 'pf_users' // All registered users stored in browser storage during prototype mode
+const CURRENT_KEY = 'pf_current_user' // Storage key for the currently signed-in account
+const EMAIL_PATTERN = /^\S+@\S+\.\S+$/ // Basic email format validation
 let activeCloudOnboardingIdentity = ''
 let serverHydratePromise = null
 let lastServerHydrateAt = 0
@@ -143,7 +143,7 @@ function clearCurrentAuthSnapshot(store) {
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    user: null, // 已登录用户快照
+    user: null, // Snapshot of the authenticated user
     loading: false,
     error: null,
     authTransition: ''
@@ -166,7 +166,7 @@ export const useAuthStore = defineStore('auth', {
         this.user = pickUserSnapshot(users[key])
         return
       }
-      // 兼容旧数据：遍历查找账号或邮箱匹配
+      // Backward compatibility: scan legacy entries for matching account or email values
       for (const [storedKey, record] of Object.entries(users)) {
         const candidate = record.account?.toLowerCase?.() || record.email?.toLowerCase?.() || storedKey
         if (candidate === key.toLowerCase()) {
@@ -957,7 +957,7 @@ export const useAuthStore = defineStore('auth', {
       const normalizedAnswers = normalizeOnboardingAnswers(answers)
       if (!normalizedAnswers) return
 
-      // 如果有后端会话（通过 hydrateFromServer 获得 id/provider 等），优先写后端
+      // Prefer the server profile when a backend session already exists
       if (this.user.id) {
         try {
           const res = await fetch(buildAuthServerUrl('/profile'), {

@@ -309,36 +309,36 @@
 </template>
 
 <script setup>
-import { reactive, computed, watch, ref, onBeforeUnmount } from 'vue' // 引入响应式工具
-import { useRouter, useRoute } from 'vue-router' // 引入路由实例
-import { useAuthStore } from '@/stores/auth' // 引入鉴权仓库
+import { reactive, computed, watch, ref, onBeforeUnmount } from 'vue' // Vue reactive utilities
+import { useRouter, useRoute } from 'vue-router' // Router helpers
+import { useAuthStore } from '@/stores/auth' // Auth store
 import { AUTH_SERVER_CONFIG_ERROR, AUTH_SERVER_ORIGIN, buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { supabase } from '@/lib/supabaseClient'
 import { getStableDeviceId, saveCloudClientState } from '@/lib/cloudClientState'
 
-const router = useRouter() // 获取路由实例
-const route = useRoute() // 获取当前路由
-const auth = useAuthStore() // 获取鉴权仓库
-auth.error = null // 清空错误提示
+const router = useRouter() // Router instance
+const route = useRoute() // Current route instance
+const auth = useAuthStore() // Auth store instance
+auth.error = null // Clear any stale error message
 
-// 登录表单数据与记住偏好
+// Login form state and remember-me preference
 const form = reactive({
   account: '',
   password: '',
   remember: true
 })
 
-const loading = computed(() => auth.loading) // 登录中的状态
-const error = computed(() => auth.error) // 全局错误提示
+const loading = computed(() => auth.loading) // Active login state
+const error = computed(() => auth.error) // Global error state
 const touched = reactive({
   account: false,
   password: false
 })
-const attempts = ref(0) // 连续失败次数
-const resetHint = ref(false) // 是否提示重置密码
+const attempts = ref(0) // Consecutive failed attempts
+const resetHint = ref(false) // Whether to suggest password reset
 
-const REMEMBER_KEY = 'pf_remember_pref' // 记住登录偏好键
-const LAST_IDENTIFIER_KEY = 'pf_last_identifier' // 最近使用账号键
+const REMEMBER_KEY = 'pf_remember_pref' // Stored remember-me preference
+const LAST_IDENTIFIER_KEY = 'pf_last_identifier' // Last-used account identifier
 const LAST_CREDENTIAL_KEY = 'pf_last_login_credential'
 
 function normalizeLoginIdentifier(value) {
@@ -404,7 +404,7 @@ watch(
   }
 )
 
-const emailPattern = /^\S+@\S+\.\S+$/ // 邮箱格式
+const emailPattern = /^\S+@\S+\.\S+$/ // Email validation pattern
 const inlineErrors = computed(() => {
   const messages = {
     account: '',
@@ -426,7 +426,7 @@ const hasInlineErrors = computed(() => {
   return !!inlineErrors.value.account || !!inlineErrors.value.password
 })
 
-// 社交登录跳转
+// Social sign-in redirect state
 const socialError = ref('')
 const redirectPath = computed(() => {
   const raw = route.query.redirect

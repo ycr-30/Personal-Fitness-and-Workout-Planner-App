@@ -2373,7 +2373,7 @@ function getGoalDetailMissingFields() {
 
 function showMissingFieldsAlert(fields) {
   if (!fields.length) return
-  const message = `请填写：${fields.join('、')}`
+  const message = `Please complete: ${fields.join(', ')}`
   if (typeof window !== 'undefined' && typeof window.alert === 'function') {
     window.alert(message)
   }

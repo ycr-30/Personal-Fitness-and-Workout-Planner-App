@@ -235,17 +235,17 @@
 </template>
 
 <script setup>
-import { reactive, computed, ref, onBeforeUnmount, onMounted, watch } from 'vue' // 引入响应式工具
-import { useRouter, useRoute } from 'vue-router' // 引入路由
-import { useAuthStore } from '@/stores/auth' // 引入鉴权仓库
+import { reactive, computed, ref, onBeforeUnmount, onMounted, watch } from 'vue' // Vue reactive utilities
+import { useRouter, useRoute } from 'vue-router' // Router helpers
+import { useAuthStore } from '@/stores/auth' // Auth store
 import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 
-const router = useRouter() // 获取路由
+const router = useRouter() // Router instance
 const route = useRoute()
-const auth = useAuthStore() // 获取鉴权仓库
-auth.error = null // 清空错误
+const auth = useAuthStore() // Auth store instance
+auth.error = null // Clear any stale error state
 
-// 注册表单数据
+// Registration form state
 const form = reactive({
   name: '',
   account: '',
@@ -281,8 +281,8 @@ const verification = reactive({
 })
 let verifyTimer = null
 
-const emailPattern = /^\S+@\S+\.\S+$/ // 邮箱模式
-const usernamePattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/ // 用户名规则
+const emailPattern = /^\S+@\S+\.\S+$/ // Email validation pattern
+const usernamePattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{6,}$/ // Username policy
 const isSocial = computed(() => (route.query.prefill || '').toString() === 'google')
 
 function generateUsernameFromEmail(val) {
@@ -302,7 +302,7 @@ function normalizeBirthdayValue(value) {
   return parsed.toISOString().split('T')[0]
 }
 
-// 估算体脂率
+// Estimate body fat percentage from BMI, age, and sex
 const bodyFat = computed(() => {
   if (!form.height || !form.weight || !form.birthday) return null
   const birthday = new Date(form.birthday)
@@ -392,8 +392,8 @@ watch(
   }
 )
 
-const loading = computed(() => auth.loading) // 加载状态
-const error = computed(() => auth.error) // 全局错误
+const loading = computed(() => auth.loading) // Loading state
+const error = computed(() => auth.error) // Global error state
 
 onBeforeUnmount(() => {
   if (verifyTimer) {
@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
   }
 })
 
-// 如果是社交登录回调，尝试从后端会话读取基础信息进行预填
+// Prefill the form from the server session after a social sign-in callback
 onMounted(async () => {
   if (!isSocial.value) return
   if (route.query.name) form.name = route.query.name

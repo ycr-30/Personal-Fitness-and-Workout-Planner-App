@@ -37,7 +37,7 @@ const router = useRouter()
 const open = ref(false)
 const root = ref(null)
 
-// 计算头像样式（有上传头像则显示背景图）
+// Build avatar styles and prefer the uploaded image when available
 const avatar = computed(() => auth.avatar)
 const avatarStyle = computed(() =>
   avatar.value
@@ -47,7 +47,7 @@ const avatarStyle = computed(() =>
     : {}
 )
 
-// 根据姓名生成默认首字母
+// Generate fallback initials from the user's display name
 const initials = computed(() => {
   const name = auth.user?.name || 'User'
   const parts = name.trim().split(' ')
@@ -66,7 +66,7 @@ function closeMenu() {
   open.value = false
 }
 
-// 监听点击区域以关闭菜单
+// Close the menu when the user clicks outside the component
 function handleClickOutside(event) {
   if (!root.value) return
   if (!root.value.contains(event.target)) {
