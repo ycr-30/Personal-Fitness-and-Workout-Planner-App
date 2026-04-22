@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient'
 import { getUserStorageKey } from './userStorage'
 import { buildAuthServerUrl } from './authServerOrigin'
+import { fetchJsonWithTimeout } from './fetchWithTimeout'
 import { buildDefaultNutritionTargets, toNumber } from '@/utils/nutritionCalculations'
 import { buildPlanGoalLink } from '@/utils/nutritionGoalMapping'
 
@@ -67,6 +68,8 @@ function buildWorkoutContext(workoutLogs) {
   }
 }
 
+const NUTRITION_AI_TIMEOUT_MS = 8000
+
 export function buildFallbackNutritionTargetRecommendation({ authUser, planState, goalType }) {
   const fallback = buildDefaultNutritionTargets({
     weightKg: resolveWeightKg(authUser, planState),
@@ -88,30 +91,34 @@ async function requestNutritionTargetRecommendation({
   goalType,
   nutritionSummary
 }) {
-  const response = await fetch(buildAuthServerUrl('/api/ai/nutrition/targets'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      goal_type: goalType,
-      plan_goal_label: planGoalLink?.workoutGoalLabel || '',
-      nutrition_summary: nutritionSummary || {},
-      workout_context: buildWorkoutContext(readStoredWorkoutLogs(authUser)),
-      user_profile: {
-        name: authUser?.name || 'KeepFit user',
-        sex: authUser?.sex || '',
-        weightKg: resolveWeightKg(authUser, planState),
-        bodyFat: toNumber(planState?.bodyMetrics?.bodyFat) || null,
-        heightCm: toNumber(authUser?.heightCm || authUser?.height) || null
-      }
-    })
-  })
+  const { response, data } = await fetchJsonWithTimeout(
+    buildAuthServerUrl('/api/ai/nutrition/targets'),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        goal_type: goalType,
+        plan_goal_label: planGoalLink?.workoutGoalLabel || '',
+        nutrition_summary: nutritionSummary || {},
+        workout_context: buildWorkoutContext(readStoredWorkoutLogs(authUser)),
+        user_profile: {
+          name: authUser?.name || 'KeepFit user',
+          sex: authUser?.sex || '',
+          weightKg: resolveWeightKg(authUser, planState),
+          bodyFat: toNumber(planState?.bodyMetrics?.bodyFat) || null,
+          heightCm: toNumber(authUser?.heightCm || authUser?.height) || null
+        }
+      })
+    },
+    NUTRITION_AI_TIMEOUT_MS,
+    'Nutrition target request'
+  )
 
   if (!response.ok) {
-    throw new Error(`Nutrition target request failed (${response.status}).`)
+    throw new Error(data?.error || `Nutrition target request failed (${response.status}).`)
   }
 
-  const data = await response.json()
   return {
     goal_type: goalType,
     calories_target: toNumber(data?.calories_target),
@@ -200,11 +207,10 @@ export async function syncNutritionGoalsWithPlan({
 
   const planGoalLink = buildPlanGoalLink(planState)
   const goalType = planGoalLink.nutritionGoalType
-  const recommendation = await generateNutritionTargetRecommendation({
+  const recommendation = buildFallbackNutritionTargetRecommendation({
     authUser,
     planState,
-    goalType,
-    nutritionSummary
+    goalType
   })
 
   const payload = {

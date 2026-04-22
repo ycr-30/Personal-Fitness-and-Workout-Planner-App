@@ -829,6 +829,8 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
+import { fetchJsonWithTimeout } from '@/lib/fetchWithTimeout'
+import { getCachedNutritionMealsByDate } from '@/lib/nutritionSyncState'
 import { getUserStorageKey } from '@/lib/userStorage'
 import { sanitizePlanWeightRecords } from '@/lib/planWeightRecords'
 
@@ -960,6 +962,7 @@ const aiInsight = ref(null)
 const aiMeta = ref(createEmptyAiMeta())
 const aiLoading = ref(false)
 const aiError = ref('')
+const nutritionTodayCalories = ref(null)
 const consistencyTooltip = ref({
   visible: false,
   x: 0,
@@ -1387,6 +1390,16 @@ function loadPlan() {
   }
 }
 
+function loadNutritionToday() {
+  const entries = getCachedNutritionMealsByDate(auth.user, todayIso.value)
+  if (!Array.isArray(entries) || !entries.length) {
+    nutritionTodayCalories.value = null
+    return
+  }
+  const total = entries.reduce((sum, entry) => sum + (Number(entry?.calories) || 0), 0)
+  nutritionTodayCalories.value = total > 0 ? Math.round(total) : null
+}
+
 function buildAnalyticsSummaryFingerprint(summary, range) {
   return JSON.stringify({
     range,
@@ -1412,13 +1425,17 @@ function loadCachedAiInsight() {
       return
     }
     const normalizedInsight = normalizeAiInsightPayload(parsed?.insight)
+    if (!normalizedInsight) {
+      localStorage.removeItem(aiInsightKey.value)
+      aiInsight.value = null
+      aiMeta.value = createEmptyAiMeta()
+      return
+    }
     aiInsight.value = normalizedInsight
     aiMeta.value = {
       source: String(parsed?.meta?.source || ''),
       generatedAt: String(parsed?.meta?.generatedAt || ''),
-      unavailable:
-        Boolean(parsed?.meta?.unavailable) ||
-        (!normalizedInsight && Boolean(parsed?.insight || parsed?.meta?.source || parsed?.meta?.generatedAt))
+      unavailable: false
     }
   } catch (error) {
     console.error('Failed to parse cached AI insight', error)
@@ -1463,13 +1480,16 @@ async function loadCloudAiInsight() {
       return
     }
     const normalizedInsight = normalizeAiInsightPayload(payload?.insight)
+    if (!normalizedInsight) {
+      aiInsight.value = null
+      aiMeta.value = createEmptyAiMeta()
+      return
+    }
     aiInsight.value = normalizedInsight
     aiMeta.value = {
       source: String(payload?.meta?.source || ''),
       generatedAt: String(payload?.meta?.generatedAt || ''),
-      unavailable:
-        Boolean(payload?.meta?.unavailable) ||
-        (!normalizedInsight && Boolean(payload?.insight || payload?.meta?.source || payload?.meta?.generatedAt))
+      unavailable: false
     }
     if (typeof window !== 'undefined') {
       localStorage.setItem(aiInsightKey.value, JSON.stringify({
@@ -1487,6 +1507,9 @@ function handleStorage(event) {
   if (!event || event.key === logsKey.value || event.key === planKey.value) {
     loadLogs()
     loadPlan()
+  }
+  if (!event || String(event.key || '').includes('pf_nutrition_')) {
+    loadNutritionToday()
   }
   if (!event || event.key === aiInsightKey.value) {
     loadCachedAiInsight()
@@ -3259,7 +3282,7 @@ function challengeActualValue(id) {
   if (id === 'walkDistance') return Number((distanceSummary.value.walk / weekFactor.value).toFixed(1))
   if (id === 'rideDistance') return Number((distanceSummary.value.ride / weekFactor.value).toFixed(1))
   if (id === 'strengthSets') return Math.round(totalStrengthSets.value / weekFactor.value)
-  if (id === 'intake') return toNumber(planState.value.dailyLogs?.intakeKcal)
+  if (id === 'intake') return nutritionTodayCalories.value ?? toNumber(planState.value.dailyLogs?.intakeKcal)
   if (id === 'deficit') return toNumber(planState.value.dailyLogs?.deficitKcal)
   if (id === 'steps') return null
   return null
@@ -3459,7 +3482,7 @@ const analyticsSummary = computed(() => ({
     weeklyActiveDays: consistencyWeeklyBars.value.map((week) => week.activeDays)
   },
   nutrition: {
-    intakeKcal: toNumber(planState.value.dailyLogs?.intakeKcal),
+    intakeKcal: nutritionTodayCalories.value ?? toNumber(planState.value.dailyLogs?.intakeKcal),
     deficitKcal: toNumber(planState.value.dailyLogs?.deficitKcal),
     intakeNote: String(planState.value.dailyLogs?.intakeNote || '').trim()
   },
@@ -3503,36 +3526,101 @@ const aiMetaLabel = computed(() => {
   return ['Last updated', timestamp, confidenceLabel].filter(Boolean).join(' · ')
 })
 
+function buildClientFallbackAiInsight() {
+  const weakChallenges = challengeCards.value
+    .filter((item) => item.targetValue != null && item.progressPercent < 70)
+    .map((item) => item.title)
+    .slice(0, 2)
+  const sparseSessions = totalSessions.value < 2 || totalMinutes.value < 30
+  const sparseBody =
+    weightSeries.value.length < 2 &&
+    bodyFatSeries.value.length < 2 &&
+    normalizedCircumferenceRecords.value.length < 2
+  const insufficientData = sparseSessions || sparseBody
+
+  const risks = []
+  if (completionRate.value < 65) {
+    risks.push('Completion is below target, so schedule consistency is the main bottleneck right now.')
+  }
+  if (avgDailyMinutes.value < 20) {
+    risks.push('Daily movement volume is still low for reliable progression.')
+  }
+  if (weakChallenges.length) {
+    risks.push(`Lowest-adherence targets right now: ${weakChallenges.join(', ')}.`)
+  }
+
+  const next7Days = []
+  if (pendingSessions.value > 0) {
+    next7Days.push('Convert at least 1 pending session into a completed workout.')
+  }
+  if (weightSeries.value.length < 2) {
+    next7Days.push('Add 1 more weigh-in to strengthen your body-composition trend.')
+  } else if (bodyFatSeries.value.length < 2) {
+    next7Days.push('Record 1 more body fat entry to improve composition tracking.')
+  }
+  if (weakChallenges.length) {
+    next7Days.push(`Bring ${weakChallenges[0]} closer to at least 70% of target.`)
+  }
+
+  const keyInsight = insufficientData
+    ? `Only ${totalSessions.value} session${totalSessions.value === 1 ? '' : 's'} and ${totalMinutes.value} total minutes are logged in ${periodLabel.value.toLowerCase()}, so this insight is based on limited data.`
+    : completionRate.value >= 75
+      ? `Training consistency is reasonably stable in ${periodLabel.value.toLowerCase()}, but adherence is still uneven across a few targets.`
+      : `The main issue in ${periodLabel.value.toLowerCase()} is inconsistent completion rather than lack of targets.`
+
+  return {
+    keyInsight,
+    risks: risks.slice(0, 3),
+    next7Days: next7Days.slice(0, 3),
+    confidence: insufficientData ? 'low' : 'medium',
+    insufficientData,
+    basedOn: {
+      timeRange: periodLabel.value,
+      snapshotVersion: analyticsSummaryFingerprint.value
+    }
+  }
+}
+
 async function fetchAiInsight() {
   aiError.value = ''
   aiLoading.value = true
   try {
-    const response = await fetch(buildAuthServerUrl('/api/ai/analytics/insights'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        rangeDays: rangeDays.value,
-        snapshotVersion: analyticsSummaryFingerprint.value,
-        summary: analyticsSummary.value
-      })
-    })
-    const payload = await response.json().catch(() => ({}))
+    const { response, data: payload } = await fetchJsonWithTimeout(
+      buildAuthServerUrl('/api/ai/analytics/insights'),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          rangeDays: rangeDays.value,
+          snapshotVersion: analyticsSummaryFingerprint.value,
+          summary: analyticsSummary.value
+        })
+      },
+      10000,
+      'Analytics insight request'
+    )
     if (!response.ok) {
       throw new Error(payload?.error || 'Failed to generate analytics insight.')
     }
     const normalizedInsight = normalizeAiInsightPayload(payload?.insight)
-    aiInsight.value = normalizedInsight
+    const fallbackInsight = buildClientFallbackAiInsight()
+    aiInsight.value = normalizedInsight || fallbackInsight
     aiMeta.value = {
-      source: payload?.meta?.source || '',
+      source: normalizedInsight ? payload?.meta?.source || 'ai' : 'heuristic_fallback',
       generatedAt: payload?.meta?.generatedAt || new Date().toISOString(),
-      unavailable:
-        Boolean(payload?.meta?.unavailable) ||
-        (!normalizedInsight && Boolean(payload?.insight || payload?.meta?.source || payload?.meta?.generatedAt))
+      unavailable: false
     }
     saveCachedAiInsight()
   } catch (error) {
-    aiError.value = error?.message || 'Failed to generate analytics insight.'
+    aiError.value = ''
+    aiInsight.value = buildClientFallbackAiInsight()
+    aiMeta.value = {
+      source: 'heuristic_fallback',
+      generatedAt: new Date().toISOString(),
+      unavailable: false
+    }
+    saveCachedAiInsight()
   } finally {
     aiLoading.value = false
   }
@@ -3570,6 +3658,7 @@ watch(
   () => {
     loadLogs()
     loadPlan()
+    loadNutritionToday()
   },
   { immediate: true }
 )
@@ -3586,6 +3675,7 @@ watch(rangeDays, () => {
 onMounted(() => {
   loadLogs()
   loadPlan()
+  loadNutritionToday()
   loadCachedAiInsight()
   loadCloudAiInsight()
   syncThemeSnapshot()
@@ -3593,6 +3683,7 @@ onMounted(() => {
     window.addEventListener('storage', handleStorage)
     window.addEventListener('pf_logs_updated', loadLogs)
     window.addEventListener('pf_plan_updated', loadPlan)
+    window.addEventListener('pf_nutrition_updated', loadNutritionToday)
     if (typeof MutationObserver !== 'undefined' && document?.documentElement) {
       themeObserver = new MutationObserver(syncThemeSnapshot)
       themeObserver.observe(document.documentElement, {
@@ -3608,6 +3699,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', handleStorage)
     window.removeEventListener('pf_logs_updated', loadLogs)
     window.removeEventListener('pf_plan_updated', loadPlan)
+    window.removeEventListener('pf_nutrition_updated', loadNutritionToday)
   }
   themeObserver?.disconnect()
   themeObserver = null

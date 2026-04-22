@@ -107,6 +107,9 @@ const CHAT_REQUEST_TIMEOUT_MS =
   Number.isInteger(parsedChatTimeoutMs) && parsedChatTimeoutMs >= 2000
     ? Math.min(parsedChatTimeoutMs, 120000)
     : 25000
+const ANALYTICS_INSIGHT_TIMEOUT_MS = Math.min(CHAT_REQUEST_TIMEOUT_MS, 10000)
+const NUTRITION_CARDS_TIMEOUT_MS = Math.min(CHAT_REQUEST_TIMEOUT_MS, 8000)
+const NUTRITION_TARGETS_TIMEOUT_MS = Math.min(CHAT_REQUEST_TIMEOUT_MS, 8000)
 const EMBEDDING_REQUEST_TIMEOUT_MS =
   Number.isInteger(parsedEmbeddingTimeoutMs) && parsedEmbeddingTimeoutMs >= 1000
     ? Math.min(parsedEmbeddingTimeoutMs, 60000)
@@ -2156,7 +2159,7 @@ async function requestAnalyticsInsight({ summary, rangeDays, snapshotVersion, us
       snapshot_version: snapshotVersion,
       user_profile: userProfile || null
     },
-    timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+    timeoutMs: ANALYTICS_INSIGHT_TIMEOUT_MS,
     label: 'Analytics insight'
   })
   return payload?.insight || null
@@ -3706,10 +3709,9 @@ app.post('/api/ai/analytics/insights', requireAuth, async (req, res) => {
           source = 'ai'
           usedFallback = false
         } else {
-          insight = null
-          source = 'unavailable'
+          source = dataState.insufficientData ? 'low_data' : 'heuristic_fallback'
           usedFallback = true
-          unavailable = true
+          unavailable = false
         }
       } catch (err) {
         console.error('Failed to generate analytics insights', err)
@@ -3754,7 +3756,7 @@ app.post('/api/ai/nutrition/cards', requireAuth, async (req, res) => {
     const payload = await requestCustomAgentEndpoint({
       path: '/nutrition/cards',
       payload: req.body && typeof req.body === 'object' ? req.body : {},
-      timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+      timeoutMs: NUTRITION_CARDS_TIMEOUT_MS,
       label: 'Nutrition cards'
     })
     return res.json(payload)
@@ -3769,7 +3771,7 @@ app.post('/api/ai/nutrition/targets', requireAuth, async (req, res) => {
     const payload = await requestCustomAgentEndpoint({
       path: '/nutrition/targets',
       payload: req.body && typeof req.body === 'object' ? req.body : {},
-      timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+      timeoutMs: NUTRITION_TARGETS_TIMEOUT_MS,
       label: 'Nutrition targets'
     })
     return res.json(payload)

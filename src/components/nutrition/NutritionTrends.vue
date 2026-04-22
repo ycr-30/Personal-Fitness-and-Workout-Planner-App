@@ -42,7 +42,7 @@
           </div>
         </header>
 
-        <div v-if="chart.hasData" class="trend-chart-shell">
+        <div v-if="chart.hasData && !chart.useSparseSummary" class="trend-chart-shell">
           <div class="trend-chart-meta">
             <span>{{ chart.contextLabel }}</span>
             <span>{{ chart.latestDateLabel }}</span>
@@ -101,6 +101,23 @@
             <span>{{ chart.endLabel }}</span>
           </footer>
 
+          <p class="trend-note">{{ chart.note }}</p>
+        </div>
+
+        <div v-else-if="chart.useSparseSummary" class="trend-sparse">
+          <div class="trend-sparse-main">
+            <div class="trend-sparse-current">
+              <span class="trend-sparse-label">Current value</span>
+              <strong>{{ chart.currentLabel }}</strong>
+              <small>{{ chart.sparseMeta }}</small>
+            </div>
+            <div v-if="chart.previousLabel" class="trend-sparse-previous">
+              <span>Previous</span>
+              <strong>{{ chart.previousLabel }}</strong>
+              <small :class="chart.deltaTone">{{ chart.deltaLabel }}</small>
+            </div>
+          </div>
+          <p class="trend-sparse-message">{{ chart.sparseMessage }}</p>
           <p class="trend-note">{{ chart.note }}</p>
         </div>
 
@@ -267,8 +284,8 @@ function buildChart(metric) {
     }
   }
 
-  const step = props.series.length > 1 ? (width - padding * 2) / (props.series.length - 1) : 0
-  const points = []
+  const dateStep = props.series.length > 1 ? (width - padding * 2) / (props.series.length - 1) : 0
+  const rawPoints = []
 
   props.series.forEach((item, index) => {
     const value = Number(item?.[metric] || 0)
@@ -278,14 +295,14 @@ function buildChart(metric) {
 
     if (!hasEntry) return
 
-    points.push({
-      x: padding + index * step,
+    rawPoints.push({
+      x: padding + index * dateStep,
       value,
       date: item?.date
     })
   })
 
-  const hasData = points.length > 0
+  const hasData = rawPoints.length > 0
   if (!hasData) {
     return {
       id: metric,
@@ -309,6 +326,19 @@ function buildChart(metric) {
       }
     }
   }
+
+  const firstLoggedDate = rawPoints[0]?.date || null
+  const latestLoggedDate = rawPoints[rawPoints.length - 1]?.date || null
+  const useSparseSummary = rawPoints.length < 2
+  const points = useSparseSummary
+    ? rawPoints
+    : rawPoints.map((point, index) => {
+        const loggedStep = rawPoints.length > 1 ? (width - padding * 2) / (rawPoints.length - 1) : 0
+        return {
+          ...point,
+          x: padding + index * loggedStep
+        }
+      })
 
   const loggedValues = points.map((point) => point.value)
   const rawMin = Math.min(...loggedValues, 0)
@@ -347,19 +377,26 @@ function buildChart(metric) {
     id: metric,
     ...config,
     hasData,
+    useSparseSummary,
     path,
     area,
     points: plottedPoints,
     areaColor: `rgba(${config.rgb}, 0.14)`,
     totalLabel: `Range total ${formatMetricValue(total, config)}`,
     currentLabel: formatMetricValue(currentValue, config),
+    previousLabel: Number.isFinite(previousValue) ? formatMetricValue(previousValue, config) : '',
     deltaLabel: formatDeltaLabel(delta, config),
     deltaTone: formatDeltaTone(delta),
     minLabel: formatMetricValue(rawMin, config),
     maxLabel: formatMetricValue(rawMax, config),
-    startLabel: props.series.length ? formatChartDate(props.series[0].date) : '--',
-    endLabel: props.series.length ? formatChartDate(props.series[props.series.length - 1].date) : '--',
-    latestDateLabel: plottedPoints.length ? formatTooltipDate(plottedPoints[plottedPoints.length - 1].date) : '--',
+    startLabel: firstLoggedDate ? formatChartDate(firstLoggedDate) : '--',
+    endLabel: latestLoggedDate ? formatChartDate(latestLoggedDate) : '--',
+    latestDateLabel: latestLoggedDate ? formatTooltipDate(latestLoggedDate) : '--',
+    sparseMeta:
+      firstLoggedDate && latestLoggedDate
+        ? `${formatChartDate(firstLoggedDate)} - ${formatChartDate(latestLoggedDate)} · ${rawPoints.length} logged day${rawPoints.length > 1 ? 's' : ''}`
+        : `${rawPoints.length} logged day${rawPoints.length > 1 ? 's' : ''}`,
+    sparseMessage: 'Only 1 logged day is available in this range. Add another entry to reveal the trend curve.',
     themeStyle: {
       '--accent': config.color,
       '--accent-rgb': config.rgb
@@ -722,6 +759,73 @@ const charts = computed(() => ['calories', 'protein', 'carbs', 'water'].map((met
   color: color-mix(in srgb, var(--text-muted) 92%, transparent);
 }
 
+.trend-sparse {
+  min-height: 294px;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background:
+    linear-gradient(180deg, rgba(var(--accent-rgb), 0.05), transparent 24%),
+    color-mix(in srgb, var(--surface-soft) 95%, transparent);
+  display: grid;
+  align-content: center;
+  gap: 16px;
+  padding: 24px;
+}
+
+.trend-sparse-main {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.trend-sparse-current,
+.trend-sparse-previous {
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  padding: 16px 18px;
+  display: grid;
+  gap: 6px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 74%, transparent);
+}
+
+.trend-sparse-label,
+.trend-sparse-previous span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text-muted) 88%, transparent);
+}
+
+.trend-sparse-current strong,
+.trend-sparse-previous strong {
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.trend-sparse-current small,
+.trend-sparse-previous small {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--text-muted) 92%, transparent);
+}
+
+.trend-sparse-previous small.positive {
+  color: color-mix(in srgb, #22c55e 74%, var(--text-primary));
+}
+
+.trend-sparse-previous small.negative {
+  color: color-mix(in srgb, #ef4444 74%, var(--text-primary));
+}
+
+.trend-sparse-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--text-muted) 94%, transparent);
+}
+
 .trend-empty {
   min-height: 294px;
   border-radius: 22px;
@@ -787,6 +891,10 @@ const charts = computed(() => ['calories', 'protein', 'carbs', 'water'].map((met
   .trend-delta {
     text-align: left;
   }
+
+  .trend-sparse-main {
+    grid-template-columns: 1fr;
+  }
 }
 
 :global(:root[data-theme='dark']) .panel {
@@ -809,6 +917,13 @@ const charts = computed(() => ['calories', 'protein', 'carbs', 'water'].map((met
       color-mix(in srgb, var(--surface-soft) 96%, transparent),
       color-mix(in srgb, var(--surface-muted) 94%, transparent)
     );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+}
+
+:global(:root[data-theme='dark']) .trend-sparse-current,
+:global(:root[data-theme='dark']) .trend-sparse-previous {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.03),
     inset 0 -1px 0 rgba(255, 255, 255, 0.02);

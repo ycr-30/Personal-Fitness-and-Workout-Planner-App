@@ -72,8 +72,8 @@
 
         <footer class="drawer-foot">
           <button class="ghost-btn" type="button" @click="$emit('close')">Cancel</button>
-          <button class="save-btn" type="button" :disabled="loading" @click="submit">
-            {{ loading ? 'Saving...' : 'Save Goals' }}
+          <button class="save-btn" type="button" :disabled="loading || saving" @click="submit">
+            {{ saving ? 'Saving...' : 'Save Goals' }}
           </button>
         </footer>
       </aside>
@@ -94,6 +94,7 @@ const props = defineProps({
   recommendedTargetsLoading: { type: Boolean, default: false },
   recommendedTargetsError: { type: String, default: '' },
   loading: { type: Boolean, default: false },
+  saving: { type: Boolean, default: false },
   error: { type: String, default: '' }
 })
 

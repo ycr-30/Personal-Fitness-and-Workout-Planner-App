@@ -87,6 +87,7 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
 
   const goals = ref(readCachedValue(getGoalsCacheKey(), null))
   const goalsLoading = ref(false)
+  const goalsSaving = ref(false)
   const goalsError = ref('')
   const planStateSnapshot = ref(readStoredPlanState(auth.user) || {})
   const recommendedTargets = ref(readCachedValue(getRecommendationsCacheKey(), {}))
@@ -255,6 +256,7 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
   async function saveGoals(nextValues) {
     if (!supabase) throw new Error('Supabase is not configured.')
     goalsError.value = ''
+    goalsSaving.value = true
     const planState = planStateSnapshot.value || readStoredPlanState(auth.user) || {}
     const linkedGoal = buildPlanGoalLink(planState)
     const nextGoalType = linkedGoal.nutritionGoalType || nextValues.goal_type || goals.value?.goal_type || 'maintenance'
@@ -317,6 +319,8 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
       }
       goalsError.value = 'Unable to save nutrition goals right now.'
       throw err
+    } finally {
+      goalsSaving.value = false
     }
   }
 
@@ -432,6 +436,7 @@ export function useNutritionSummary({ selectedDate, mealEntries, waterEntries })
     recommendedTargetsError,
     effectiveTargets,
     goalsLoading,
+    goalsSaving,
     goalsError,
     summary,
     exerciseBurn,

@@ -815,19 +815,32 @@
                 <div class="chart-label">{{ weightMetricLabel }}</div>
                 <div class="chart-canvas">
                   <span
-                    v-if="chartTargetLabel"
+                    v-if="chartTargetLabel && !weightChartSummaryState"
                     class="target-label"
                     :style="{ top: chartTargetOffset }"
                   >
                     {{ chartTargetLabel }}
                   </span>
-                  <div class="chart-grid">
+                  <div class="chart-grid-layout">
                     <div class="y-axis">
                       <span v-for="label in weightChartAxis.yLabels" :key="label">{{ label }}</span>
                     </div>
                     <div class="chart-plot">
-                      <svg viewBox="0 0 360 160" preserveAspectRatio="xMidYMid meet">
-                        <g class="chart-grid">
+                      <div v-if="weightChartSummaryState" class="weight-chart-summary">
+                        <div class="summary-card primary">
+                          <span>Current</span>
+                          <strong>{{ weightChartSummaryState.currentLabel }}</strong>
+                          <small>{{ weightChartSummaryState.meta }}</small>
+                        </div>
+                        <div v-if="weightChartSummaryState.previousLabel" class="summary-card">
+                          <span>Previous</span>
+                          <strong>{{ weightChartSummaryState.previousLabel }}</strong>
+                          <small :class="weightChartSummaryState.deltaTone">{{ weightChartSummaryState.deltaLabel }}</small>
+                        </div>
+                        <p class="summary-message">{{ weightChartSummaryState.message }}</p>
+                      </div>
+                      <svg v-else viewBox="0 0 360 120" preserveAspectRatio="none">
+                        <g class="chart-grid-lines">
                           <line x1="0" y1="30" x2="360" y2="30" />
                           <line x1="0" y1="60" x2="360" y2="60" />
                           <line x1="0" y1="90" x2="360" y2="90" />
@@ -852,7 +865,7 @@
                           r="3.2"
                         />
                       </svg>
-                      <div class="chart-labels">
+                      <div v-if="!weightChartSummaryState" class="chart-labels">
                         <span v-for="(label, index) in weightChartAxis.xLabels" :key="index">{{ label }}</span>
                       </div>
                     </div>
@@ -1651,8 +1664,12 @@ const weightRecordsChart = computed(() => {
   return filtered.slice().sort((a, b) => getPlanWeightRecordTime(a) - getPlanWeightRecordTime(b))
 })
 
+const weightMetricRecordsChart = computed(() =>
+  weightRecordsChart.value.filter((record) => getRecordMetric(record, weightDetailMetric.value) != null)
+)
+
 const weightRecordsInRange = computed(() => {
-  return weightRecordsChart.value.slice().sort((a, b) => getPlanWeightRecordTime(b) - getPlanWeightRecordTime(a))
+  return weightMetricRecordsChart.value.slice().sort((a, b) => getPlanWeightRecordTime(b) - getPlanWeightRecordTime(a))
 })
 
 const recentWeightRecords = computed(() => weightRecordsInRange.value.slice(0, 3))
@@ -1676,30 +1693,78 @@ const chartTargetValue = computed(() => {
 })
 
 const weightChart = computed(() =>
-  buildChart(weightRecordsChart.value, weightDetailMetric.value, chartTargetValue.value)
+  buildChart(weightMetricRecordsChart.value, weightDetailMetric.value, chartTargetValue.value)
 )
 const weightChartPath = computed(() => weightChart.value.line)
 const weightChartArea = computed(() => weightChart.value.area)
 const weightChartPoints = computed(() => weightChart.value.points)
 const chartTargetY = computed(() => weightChart.value.targetY)
+const weightChartSummaryState = computed(() => {
+  const records = weightMetricRecordsChart.value
+  if (!records.length) return null
+  const values = records
+    .map((record) => getRecordMetric(record, weightDetailMetric.value))
+    .filter((value) => value != null)
+  if (!values.length) return null
+  if (values.length > 2) return null
+  const uniqueValues = new Set(values.map((value) => value.toFixed(2)))
+
+  const latest = records[records.length - 1]
+  const previous = records.length > 1 ? records[records.length - 2] : null
+  const latestValue = getRecordMetric(latest, weightDetailMetric.value)
+  const previousValue = previous ? getRecordMetric(previous, weightDetailMetric.value) : null
+  const delta =
+    latestValue != null && previousValue != null ? Number((latestValue - previousValue).toFixed(2)) : null
+
+  let deltaLabel = 'First logged record'
+  let deltaTone = 'neutral'
+  if (delta != null) {
+    if (Math.abs(delta) < 0.01) {
+      deltaLabel = 'Stable versus previous record'
+    } else {
+      const unit =
+        weightDetailMetric.value === 'weight'
+          ? 'kg'
+          : weightDetailMetric.value === 'height'
+            ? 'cm'
+            : weightDetailMetric.value === 'bodyFat'
+              ? '%'
+              : ''
+      deltaLabel = `${delta > 0 ? 'Up' : 'Down'} ${Math.abs(delta).toFixed(1)}${unit ? ` ${unit}` : ''}`
+      deltaTone = delta > 0 ? 'positive' : 'negative'
+    }
+  }
+
+  return {
+    currentLabel: recordValue(latest),
+    previousLabel: previous ? recordValue(previous) : '',
+    deltaLabel,
+    deltaTone,
+    meta: `${formatShortDate(records[0].date)} - ${formatShortDate(latest.date)} · ${records.length} record${records.length > 1 ? 's' : ''}`,
+    message:
+      uniqueValues.size === 1
+        ? `All logged ${weightMetricLabel.value.toLowerCase()} values are unchanged in this range.`
+        : `Only ${records.length} logged record${records.length > 1 ? 's are' : ' is'} available in this range. Add one more entry to reveal the trend curve.`
+  }
+})
 const weightChartAxis = computed(() => {
   const labels = getAxisLabels(weightChart.value.min, weightChart.value.max)
   const xLabels =
-    weightRecordsChart.value.length > 0 && weightRecordsChart.value.length <= 4
+    weightMetricRecordsChart.value.length > 0 && weightMetricRecordsChart.value.length <= 4
       ? (() => {
           const duplicateDates = new Set(
-            weightRecordsChart.value
+            weightMetricRecordsChart.value
               .map((record) => String(record?.date || '').trim())
               .filter((date, index, list) => date && list.indexOf(date) !== index)
           )
-          return weightRecordsChart.value.map((record) => formatWeightAxisLabel(record, duplicateDates))
+          return weightMetricRecordsChart.value.map((record) => formatWeightAxisLabel(record, duplicateDates))
         })()
       : getRangeLabels(rangeBounds.value)
   return { yLabels: labels, xLabels }
 })
 const chartTargetOffset = computed(() => {
   if (chartTargetY.value == null) return '0%'
-  const percent = (chartTargetY.value / 160) * 100
+  const percent = (chartTargetY.value / 120) * 100
   return `${Math.min(Math.max(percent, 0), 100)}%`
 })
 const chartTargetLabel = computed(() => {
@@ -2737,11 +2802,18 @@ function filterRecordsByRange(records, range, offset = 0) {
 }
 
 function getRecordMetric(record, metric) {
-  if (metric === 'weight') return toNumber(record.weight)
-  if (metric === 'bmi') return toNumber(record.bmi)
-  if (metric === 'bodyFat') return toNumber(record.bodyFat)
-  if (metric === 'height') return toNumber(record.height)
-  return null
+  const value =
+    metric === 'weight'
+      ? toNumber(record.weight)
+      : metric === 'bmi'
+        ? toNumber(record.bmi)
+        : metric === 'bodyFat'
+          ? toNumber(record.bodyFat)
+          : metric === 'height'
+            ? toNumber(record.height)
+            : null
+  if (value == null || value <= 0) return null
+  return value
 }
 
 function buildChart(records, metric, targetValue) {
@@ -2780,11 +2852,27 @@ function buildChart(records, metric, targetValue) {
     return { x, y }
   })
 
-  const line = points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x} ${point.y}`)
-    .join(' ')
+  const line =
+    points.length === 1
+      ? (() => {
+          const point = points[0]
+          const startX = Math.max(paddingLeft, point.x - 28)
+          const endX = Math.min(width - paddingRight, point.x + 28)
+          return `M${startX} ${point.y} L${endX} ${point.y}`
+        })()
+      : points
+          .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x} ${point.y}`)
+          .join(' ')
 
-  const area = `${line} L${width - paddingRight} ${height} L${paddingLeft} ${height} Z`
+  const area =
+    points.length === 1
+      ? (() => {
+          const point = points[0]
+          const startX = Math.max(paddingLeft, point.x - 28)
+          const endX = Math.min(width - paddingRight, point.x + 28)
+          return `M${startX} ${point.y} L${endX} ${point.y} L${endX} ${height} L${startX} ${height} Z`
+        })()
+      : `${line} L${width - paddingRight} ${height} L${paddingLeft} ${height} Z`
   const targetY =
     targetValue != null
       ? paddingTop + (1 - (targetValue - min) / range) * usableHeight
@@ -4139,7 +4227,7 @@ watch(
 }
 
 .weight-chart {
-  height: 180px;
+  min-height: 180px;
   background: var(--surface-muted);
   border-radius: 16px;
   border: 1px solid var(--border);
@@ -4147,7 +4235,6 @@ watch(
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 6px;
-  overflow: hidden;
 }
 
 .chart-label {
@@ -4158,21 +4245,19 @@ watch(
 .chart-canvas {
   position: relative;
   width: 100%;
-  height: 100%;
 }
 
 .chart-canvas svg {
   width: 100%;
-  height: 100%;
   display: block;
 }
 
-.chart-canvas .chart-grid {
+.chart-canvas .chart-grid-layout {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 10px;
-  align-items: stretch;
-  height: 100%;
+  align-items: start;
+  min-height: 180px;
 }
 
 .chart-canvas .y-axis {
@@ -4181,18 +4266,19 @@ watch(
   justify-content: space-between;
   color: var(--text-muted);
   font-size: 12px;
-  padding: 4px 0;
+  min-height: 140px;
+  padding: 4px 0 22px;
 }
 
 .chart-canvas .chart-plot {
   position: relative;
-  height: 100%;
+  min-height: 162px;
   padding-bottom: 18px;
 }
 
 .chart-canvas .chart-plot svg {
   width: 100%;
-  height: 100%;
+  height: 140px;
 }
 
 .chart-canvas .chart-labels {
@@ -4206,6 +4292,64 @@ watch(
   font-size: 12px;
   height: 18px;
   line-height: 18px;
+}
+
+.weight-chart-summary {
+  min-height: 120px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.weight-chart-summary .summary-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  padding: 12px 14px;
+  display: grid;
+  gap: 4px;
+}
+
+.weight-chart-summary .summary-card.primary {
+  background: color-mix(in srgb, #34d399 10%, var(--surface-muted));
+}
+
+.weight-chart-summary .summary-card span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.weight-chart-summary .summary-card strong {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.weight-chart-summary .summary-card small {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.weight-chart-summary .summary-card small.positive {
+  color: #16a34a;
+}
+
+.weight-chart-summary .summary-card small.negative {
+  color: #dc2626;
+}
+
+.weight-chart-summary .summary-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .target-label {
@@ -4231,7 +4375,7 @@ watch(
   fill: rgba(52, 211, 153, 0.12);
 }
 
-.chart-grid line {
+.chart-grid-lines line {
   stroke: var(--border);
   stroke-dasharray: 4 4;
 }

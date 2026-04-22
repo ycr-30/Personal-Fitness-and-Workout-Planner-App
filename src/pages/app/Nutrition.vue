@@ -84,6 +84,7 @@
       :recommended-targets-loading="recommendedTargetsLoading"
       :recommended-targets-error="recommendedTargetsError"
       :loading="goalsLoading"
+      :saving="goalsSaving"
       :error="goalsError"
       @close="goalDrawerOpen = false"
       @save="handleSaveGoals"
@@ -146,6 +147,7 @@ const {
   recommendedTargetsLoading,
   recommendedTargetsError,
   goalsLoading,
+  goalsSaving,
   goalsError,
   summary,
   trendRange,

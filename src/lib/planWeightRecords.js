@@ -4,9 +4,13 @@ function toFiniteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function toPositiveWeightNumber(value) {
+function toPositiveMetricNumber(value) {
   const parsed = toFiniteNumber(value)
   return parsed != null && parsed > 0 ? parsed : null
+}
+
+export function toPositiveWeightNumber(value) {
+  return toPositiveMetricNumber(value)
 }
 
 export function hasValidPlanWeight(value) {
@@ -44,9 +48,9 @@ export function buildPlanWeightRecord({
     date: normalizedDate,
     recordedAt: resolveRecordedAt(recordedAt, normalizedDate, fallbackIndex),
     weight: normalizedWeight,
-    bmi: toFiniteNumber(bmi),
-    bodyFat: toFiniteNumber(bodyFat),
-    height: toFiniteNumber(height)
+    bmi: toPositiveMetricNumber(bmi),
+    bodyFat: toPositiveMetricNumber(bodyFat),
+    height: toPositiveMetricNumber(height)
   }
 }
 
@@ -93,6 +97,40 @@ function updateMatchingWeightRecordTimestamp(records, weightValue, recordedAt, p
   next[index] = {
     ...next[index],
     recordedAt: resolveRecordedAt(recordedAt, next[index].date, index)
+  }
+  return next
+}
+
+function enrichCurrentWeightRecord(records, { weightValue, date = '', bodyFat = null, height = null } = {}) {
+  const targetWeight = toPositiveWeightNumber(weightValue)
+  const targetDate = String(date || '').trim()
+  const nextBodyFat = toPositiveMetricNumber(bodyFat)
+  const nextHeight = toPositiveMetricNumber(height)
+
+  if (!records.length || (targetWeight == null && !targetDate) || (nextBodyFat == null && nextHeight == null)) {
+    return records
+  }
+
+  let matchIndex = -1
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index]
+    const sameDate = targetDate ? String(record?.date || '').trim() === targetDate : true
+    const sameWeight =
+      targetWeight != null ? Math.abs(Number(record?.weight) - Number(targetWeight)) < 0.05 : true
+    if (sameDate && sameWeight) {
+      matchIndex = index
+      break
+    }
+  }
+
+  if (matchIndex < 0) return records
+
+  const next = records.slice()
+  const current = next[matchIndex] || {}
+  next[matchIndex] = {
+    ...current,
+    bodyFat: toPositiveMetricNumber(current.bodyFat) ?? nextBodyFat,
+    height: toPositiveMetricNumber(current.height) ?? nextHeight
   }
   return next
 }
@@ -188,6 +226,12 @@ export function sanitizePlanStateSnapshot(planState) {
     currentWeightDate ? `${currentWeightDate}T23:59:59.000Z` : '',
     'last'
   )
+  weightRecords = enrichCurrentWeightRecord(weightRecords, {
+    weightValue: baseWeight.current,
+    date: currentWeightDate,
+    bodyFat: planState?.bodyMetrics?.bodyFat,
+    height: planState?.bodyMetrics?.heightCm
+  })
   weightRecords = sanitizePlanWeightRecords(weightRecords)
   next.weightRecords = weightRecords
   next.weight = normalizePlanWeightBlock(baseWeight, {

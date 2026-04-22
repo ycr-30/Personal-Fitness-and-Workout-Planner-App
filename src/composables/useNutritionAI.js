@@ -5,6 +5,7 @@ import { resolveMealTypeLabel, toDateKey } from '@/utils/mealTimeResolver'
 import { toNumber } from '@/utils/nutritionCalculations'
 import { recordAiAgentRun } from '@/lib/aiAgentMetrics'
 import { buildAuthServerUrl } from '@/lib/authServerOrigin'
+import { fetchJsonWithTimeout } from '@/lib/fetchWithTimeout'
 
 function buildInsightFallback(summary, trendSeries, goalType) {
   const target = summary?.targets || {}
@@ -60,6 +61,7 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
   const error = ref('')
   const insightLines = ref([])
   const recommendationLines = ref([])
+  let activeRequestId = 0
 
   const alertItems = computed(() =>
     buildNutritionAlerts({
@@ -71,6 +73,7 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
   let timer = null
 
   async function refreshAI() {
+    const requestId = ++activeRequestId
     const startedAt = Date.now()
     loading.value = true
     error.value = ''
@@ -101,18 +104,22 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
     }
 
     try {
-      const response = await fetch(buildAuthServerUrl('/api/ai/nutrition/cards'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(payload)
-      })
+      const { response, data } = await fetchJsonWithTimeout(
+        buildAuthServerUrl('/api/ai/nutrition/cards'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload)
+        },
+        8000,
+        'Nutrition AI request'
+      )
 
       if (!response.ok) {
-        throw new Error(`Nutrition AI request failed (${response.status}).`)
+        throw new Error(data?.error || `Nutrition AI request failed (${response.status}).`)
       }
 
-      const data = await response.json()
       const nextInsightLines = Array.isArray(data?.insight)
         ? data.insight
         : String(data?.insight || '')
@@ -125,16 +132,26 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
             .split('\n')
             .map((line) => line.replace(/^[\-\d\.\s]+/, '').trim())
             .filter(Boolean)
-      insightLines.value = nextInsightLines
-      recommendationLines.value = nextRecommendationLines
+
+      const resolvedInsightLines = nextInsightLines.length
+        ? nextInsightLines
+        : buildInsightFallback(summaryValue, unref(trendSeries), goalsValue?.goal_type || 'maintenance')
+      const resolvedRecommendationLines = nextRecommendationLines.length
+        ? nextRecommendationLines
+        : buildRecommendationFallback(summaryValue, unref(activeMealType))
+
+      if (requestId !== activeRequestId) return
+      insightLines.value = resolvedInsightLines
+      recommendationLines.value = resolvedRecommendationLines
 
       void recordAiAgentRun({
         agentType: 'nutrition',
-        success: nextInsightLines.length > 0 || nextRecommendationLines.length > 0,
-        usedFallback: false,
+        success: resolvedInsightLines.length > 0 || resolvedRecommendationLines.length > 0,
+        usedFallback: !nextInsightLines.length || !nextRecommendationLines.length,
         latencyMs: Date.now() - startedAt
       })
     } catch (err) {
+      if (requestId !== activeRequestId) return
       error.value = err.message || 'Unable to load nutrition AI suggestions.'
       insightLines.value = buildInsightFallback(
         summaryValue,
@@ -150,7 +167,9 @@ export function useNutritionAI({ selectedDate, activeMealType, goals, summary, t
         errorMessage: err?.message || 'Unable to load nutrition AI suggestions.'
       })
     } finally {
-      loading.value = false
+      if (requestId === activeRequestId) {
+        loading.value = false
+      }
     }
   }
 
