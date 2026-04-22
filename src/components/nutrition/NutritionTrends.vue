@@ -236,9 +236,9 @@ function buildSmoothPath(points) {
 
 function buildChart(metric) {
   const config = METRIC_CONFIG[metric]
+  const isWaterMetric = metric === 'water'
   const values = props.series.map((item) => Number(item?.[metric] || 0))
   const total = values.reduce((sum, value) => sum + value, 0)
-  const hasData = total > 0
   const width = 360
   const height = 170
   const padding = 18
@@ -267,41 +267,80 @@ function buildChart(metric) {
     }
   }
 
-  const rawMin = Math.min(...values, 0)
-  const rawMax = Math.max(...values, 0)
+  const step = props.series.length > 1 ? (width - padding * 2) / (props.series.length - 1) : 0
+  const points = []
+
+  props.series.forEach((item, index) => {
+    const value = Number(item?.[metric] || 0)
+    const hasEntry = isWaterMetric
+      ? Number(item?.waterEntryCount || 0) > 0
+      : Number(item?.mealEntryCount || 0) > 0
+
+    if (!hasEntry) return
+
+    points.push({
+      x: padding + index * step,
+      value,
+      date: item?.date
+    })
+  })
+
+  const hasData = points.length > 0
+  if (!hasData) {
+    return {
+      id: metric,
+      ...config,
+      hasData: false,
+      path: '',
+      area: '',
+      points: [],
+      totalLabel: `Range total ${formatMetricValue(0, config)}`,
+      currentLabel: formatMetricValue(0, config),
+      deltaLabel: 'First logged day',
+      deltaTone: 'neutral',
+      minLabel: formatMetricValue(0, config),
+      maxLabel: formatMetricValue(0, config),
+      startLabel: props.series.length ? formatChartDate(props.series[0].date) : '--',
+      endLabel: props.series.length ? formatChartDate(props.series[props.series.length - 1].date) : '--',
+      latestDateLabel: '--',
+      themeStyle: {
+        '--accent': config.color,
+        '--accent-rgb': config.rgb
+      }
+    }
+  }
+
+  const loggedValues = points.map((point) => point.value)
+  const rawMin = Math.min(...loggedValues, 0)
+  const rawMax = Math.max(...loggedValues, 0)
   const spread = rawMax - rawMin
   const pad = spread > 0 ? spread * 0.12 : Math.max(Math.abs(rawMax) * 0.08, 1)
   const scaledMin = rawMin - pad
   const scaledMax = rawMax + pad
   const scaledRange = scaledMax - scaledMin || 1
-  const step = props.series.length > 1 ? (width - padding * 2) / (props.series.length - 1) : 0
 
-  const points = props.series.map((item, index) => {
-    const value = Number(item?.[metric] || 0)
-    const x = padding + index * step
-    const y = height - padding - ((value - scaledMin) / scaledRange) * (height - padding * 2)
-    const previousValue = index > 0 ? Number(props.series[index - 1]?.[metric] || 0) : NaN
+  const plottedPoints = points.map((point, index) => {
+    const y = height - padding - ((point.value - scaledMin) / scaledRange) * (height - padding * 2)
+    const previousValue = index > 0 ? points[index - 1].value : NaN
     return {
-      x,
+      ...point,
       y,
-      xPercent: (x / width) * 100,
+      xPercent: (point.x / width) * 100,
       yPercent: (y / height) * 100,
-      value,
-      date: item?.date,
-      dateLabel: formatTooltipDate(item?.date),
-      valueLabel: formatMetricValue(value, config),
-      deltaLabel: formatDeltaLabel(value - previousValue, config),
-      isLatest: index === props.series.length - 1
+      dateLabel: formatTooltipDate(point.date),
+      valueLabel: formatMetricValue(point.value, config),
+      deltaLabel: formatDeltaLabel(point.value - previousValue, config),
+      isLatest: index === points.length - 1
     }
   })
 
-  const path = buildSmoothPath(points)
-  const area = points.length
-    ? `${path} L ${points[points.length - 1].x} ${height - padding} L ${points[0].x} ${height - padding} Z`
+  const path = buildSmoothPath(plottedPoints)
+  const area = plottedPoints.length
+    ? `${path} L ${plottedPoints[plottedPoints.length - 1].x} ${height - padding} L ${plottedPoints[0].x} ${height - padding} Z`
     : ''
 
-  const currentValue = values[values.length - 1] || 0
-  const previousValue = values.length > 1 ? values[values.length - 2] : NaN
+  const currentValue = plottedPoints[plottedPoints.length - 1]?.value || 0
+  const previousValue = plottedPoints.length > 1 ? plottedPoints[plottedPoints.length - 2].value : NaN
   const delta = currentValue - previousValue
 
   return {
@@ -310,7 +349,7 @@ function buildChart(metric) {
     hasData,
     path,
     area,
-    points,
+    points: plottedPoints,
     areaColor: `rgba(${config.rgb}, 0.14)`,
     totalLabel: `Range total ${formatMetricValue(total, config)}`,
     currentLabel: formatMetricValue(currentValue, config),
@@ -320,7 +359,7 @@ function buildChart(metric) {
     maxLabel: formatMetricValue(rawMax, config),
     startLabel: props.series.length ? formatChartDate(props.series[0].date) : '--',
     endLabel: props.series.length ? formatChartDate(props.series[props.series.length - 1].date) : '--',
-    latestDateLabel: props.series.length ? formatTooltipDate(props.series[props.series.length - 1].date) : '--',
+    latestDateLabel: plottedPoints.length ? formatTooltipDate(plottedPoints[plottedPoints.length - 1].date) : '--',
     themeStyle: {
       '--accent': config.color,
       '--accent-rgb': config.rgb

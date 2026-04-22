@@ -210,6 +210,8 @@ export function buildNutritionSummary({ mealEntries, waterEntries, goals, exerci
 export function buildTrendSeries({ mealEntries, waterEntries, startDate, endDate }) {
   const mealByDay = new Map()
   const waterByDay = new Map()
+  const mealCountByDay = new Map()
+  const waterCountByDay = new Map()
 
   ;(mealEntries || []).forEach((entry) => {
     const key = entry.entryDate || entry.entry_date || ''
@@ -220,12 +222,14 @@ export function buildTrendSeries({ mealEntries, waterEntries, startDate, endDate
     totals.carbs += toNumber(entry.carbsG || entry.carbs_g)
     totals.fat += toNumber(entry.fatG || entry.fat_g)
     mealByDay.set(key, totals)
+    mealCountByDay.set(key, toNumber(mealCountByDay.get(key)) + 1)
   })
 
   ;(waterEntries || []).forEach((entry) => {
     const key = entry.entryDate || entry.entry_date || ''
     if (!key) return
     waterByDay.set(key, toNumber(waterByDay.get(key)) + toNumber(entry.amountMl || entry.amount_ml))
+    waterCountByDay.set(key, toNumber(waterCountByDay.get(key)) + 1)
   })
 
   const rows = []
@@ -242,7 +246,9 @@ export function buildTrendSeries({ mealEntries, waterEntries, startDate, endDate
       protein: roundNutrition(meal.protein),
       carbs: roundNutrition(meal.carbs),
       fat: roundNutrition(meal.fat),
-      water: roundNutrition(waterByDay.get(key), 0)
+      water: roundNutrition(waterByDay.get(key), 0),
+      mealEntryCount: toNumber(mealCountByDay.get(key), 0),
+      waterEntryCount: toNumber(waterCountByDay.get(key), 0)
     })
     cursor = new Date(cursor)
     cursor.setDate(cursor.getDate() + 1)
