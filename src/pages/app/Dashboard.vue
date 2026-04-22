@@ -184,7 +184,7 @@
                   Reschedule
                 </button>
                 <button type="button" class="menu-item" @click="markRestDay">
-                  Mark as rest day
+                  {{ isRestDayToday ? 'Clear rest day' : 'Mark as rest day' }}
                 </button>
                 <button type="button" class="menu-item" @click="viewDetails">
                   View details
@@ -652,6 +652,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { buildAuthServerUrl } from '@/lib/authServerOrigin'
+import { getVisibleWorkoutLogs, nextRestDaySet, sameDateKeySet, updateLogsRestSuppression } from '@/lib/restDayState'
 import { supabase } from '@/lib/supabaseClient'
 import { formatSupabaseError, mapMealEntryRow, mapWaterEntryRow, requireNutritionUser } from '@/lib/nutritionSupabase'
 import { buildFallbackNutritionTargetRecommendation } from '@/lib/nutritionGoalSync'
@@ -728,7 +729,7 @@ function closeLogModal() {
 
 function resetLogForm() {
   logForm.date = ''
-  logForm.location = getLatestWorkoutLocation(logs.value)
+  logForm.location = getLatestWorkoutLocation(visibleLogs.value)
   logForm.exercises = []
 }
 
@@ -892,6 +893,7 @@ function addLogWorkout() {
   }
 
   saveLogs([entry, ...logs.value])
+  setRestDayState(logForm.date, false)
   closeLogModal()
 }
 
@@ -959,8 +961,8 @@ function createEmptyAgentStats() {
 }
 
 const agentStats = ref(createEmptyAgentStats())
-
-const locationSuggestions = computed(() => buildWorkoutLocationSuggestions(logs.value))
+const visibleLogs = computed(() => getVisibleWorkoutLogs(logs.value, restDays.value))
+const locationSuggestions = computed(() => buildWorkoutLocationSuggestions(visibleLogs.value))
 const muscleGroupOptions = [
   { value: 'Chest', label: 'Chest 胸' },
   { value: 'Back', label: 'Back 背' },
@@ -1116,7 +1118,7 @@ const logPrCount = computed(() => {
   const current = exercises.filter((exercise) => exercise.name)
   if (!current.length) return 0
 
-  const history = logs.value.flatMap((workout) => workout.exercises || [])
+  const history = visibleLogs.value.flatMap((workout) => workout.exercises || [])
   let count = 0
 
   current.forEach((exercise) => {
@@ -1576,10 +1578,27 @@ function loadRestDays() {
   }
 }
 
-function saveRestDays() {
+function saveRestDays(nextRestDays = restDays.value) {
+  const normalizedSet = nextRestDays instanceof Set ? new Set(nextRestDays) : new Set()
+  restDays.value = normalizedSet
   if (typeof window === 'undefined') return
-  localStorage.setItem(restKey.value, JSON.stringify(Array.from(restDays.value)))
+  localStorage.setItem(restKey.value, JSON.stringify(Array.from(normalizedSet)))
   window.dispatchEvent(new Event('pf_rest_updated'))
+}
+
+function updateRestDay(dateKey, shouldRest) {
+  const nextRestDays = nextRestDaySet(restDays.value, dateKey, shouldRest)
+  if (sameDateKeySet(restDays.value, nextRestDays)) return false
+  saveRestDays(nextRestDays)
+  return true
+}
+
+function setRestDayState(dateKey, shouldRest) {
+  const nextLogs = updateLogsRestSuppression(logs.value, dateKey, shouldRest)
+  if (nextLogs !== logs.value) {
+    saveLogs(nextLogs)
+  }
+  return updateRestDay(dateKey, shouldRest) || nextLogs !== logs.value
 }
 
 function loadPlan() {
@@ -1603,7 +1622,7 @@ function loadPlan() {
 const todayWorkouts = computed(() => {
   if (isRestDayToday.value) return []
   const today = new Date()
-  return logs.value
+  return visibleLogs.value
     .filter((item) => {
       const date = parseLocalDate(item.date)
       return date ? isSameDay(date, today) : false
@@ -1633,17 +1652,17 @@ const todayWorkouts = computed(() => {
 
 const todayLogItems = computed(() => {
   const today = new Date()
-  return logs.value.filter((item) => {
+  return visibleLogs.value.filter((item) => {
     const date = parseLocalDate(item.date)
     return date ? isSameDay(date, today) : false
   })
 })
 
-const dailyMinutesMap = computed(() => buildDailyMinutesMap(logs.value))
+const dailyMinutesMap = computed(() => buildDailyMinutesMap(visibleLogs.value))
 const currentWeekStart = computed(() => startOfWeek(new Date()))
 const currentWeekEnd = computed(() => endOfWeek(new Date()))
 const currentWeekLogs = computed(() => {
-  return logs.value.filter((item) => {
+  return visibleLogs.value.filter((item) => {
     const date = parseLocalDate(item?.date)
     return date && date >= currentWeekStart.value && date <= currentWeekEnd.value
   })
@@ -1659,13 +1678,7 @@ const weeklyScheduledMinutes = computed(() => currentWeekLogs.value.reduce((sum,
 
 const todayKey = computed(() => toIsoDate(new Date()))
 const isRestDayToday = computed(() => {
-  if (!restDays.value.has(todayKey.value)) return false
-  const today = new Date()
-  const hasWorkout = logs.value.some((item) => {
-    const date = parseLocalDate(item.date)
-    return date ? isSameDay(date, today) : false
-  })
-  return !hasWorkout
+  return restDays.value.has(todayKey.value) && todayLogItems.value.length === 0
 })
 const yesterdayKey = computed(() => {
   const date = new Date()
@@ -2107,7 +2120,7 @@ const calendarCells = computed(() => {
 
   for (let day = 1; day <= totalDays; day += 1) {
     const date = new Date(year, month, day)
-    const hasWorkout = logs.value.some((item) => {
+    const hasWorkout = visibleLogs.value.some((item) => {
       const itemDate = parseLocalDate(item.date)
       return itemDate ? isSameDay(itemDate, date) : false
     })
@@ -2129,7 +2142,7 @@ const calendarCells = computed(() => {
 
 const selectedWorkouts = computed(() => {
   const selected = selectedDate.value
-  return logs.value.filter((item) => {
+  return visibleLogs.value.filter((item) => {
     const date = parseLocalDate(item.date)
     return date ? isSameDay(date, selected) : false
   })
@@ -2184,18 +2197,13 @@ function applyReschedule() {
       : item
   )
   saveLogs(next)
+  setRestDayState(rescheduleDate.value, false)
   closeReschedule()
 }
 
 function markRestDay() {
   showTodayMenu.value = false
-  restDays.value.add(todayKey.value)
-  saveRestDays()
-  const next = logs.value.filter((item) => {
-    const date = parseLocalDate(item.date)
-    return date ? !isSameDay(date, new Date()) : true
-  })
-  saveLogs(next)
+  setRestDayState(todayKey.value, !isRestDayToday.value)
 }
 
 function goPrevMonth() {

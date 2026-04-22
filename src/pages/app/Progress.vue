@@ -831,6 +831,7 @@ import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
 import { fetchJsonWithTimeout } from '@/lib/fetchWithTimeout'
 import { getCachedNutritionMealsByDate } from '@/lib/nutritionSyncState'
+import { getVisibleWorkoutLogs } from '@/lib/restDayState'
 import { getUserStorageKey } from '@/lib/userStorage'
 import { sanitizePlanWeightRecords } from '@/lib/planWeightRecords'
 
@@ -947,10 +948,12 @@ function createEmptyAnalyticsPlan() {
 const auth = useAuthStore()
 const router = useRouter()
 const logsKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
+const restKey = computed(() => getUserStorageKey('pf_rest_days', auth.user))
 const planKey = computed(() => getUserStorageKey('pf_plan_state', auth.user))
 const aiInsightKey = computed(() => getUserStorageKey('pf_progress_ai_insight', auth.user))
 
 const logs = ref([])
+const restDays = ref(new Set())
 const planState = ref(createEmptyAnalyticsPlan())
 
 const rangeDays = ref(30)
@@ -1326,7 +1329,8 @@ function normalizeWorkout(item) {
     duration: item?.duration || '',
     tags,
     status: item?.status === 'completed' ? 'completed' : 'pending',
-    exercises: Array.isArray(item?.exercises) ? item.exercises : []
+    exercises: Array.isArray(item?.exercises) ? item.exercises : [],
+    restSuppressed: Boolean(item?.restSuppressed)
   }
 }
 
@@ -1343,6 +1347,22 @@ function loadLogs() {
   } catch (error) {
     console.error('Failed to parse logs', error)
     logs.value = []
+  }
+}
+
+function loadRestDays() {
+  if (typeof window === 'undefined') return
+  const raw = localStorage.getItem(restKey.value)
+  if (!raw) {
+    restDays.value = new Set()
+    return
+  }
+  try {
+    const data = JSON.parse(raw)
+    restDays.value = Array.isArray(data) ? new Set(data) : new Set()
+  } catch (error) {
+    console.error('Failed to parse rest days', error)
+    restDays.value = new Set()
   }
 }
 
@@ -1504,9 +1524,10 @@ async function loadCloudAiInsight() {
 }
 
 function handleStorage(event) {
-  if (!event || event.key === logsKey.value || event.key === planKey.value) {
+  if (!event || event.key === logsKey.value || event.key === planKey.value || event.key === restKey.value) {
     loadLogs()
     loadPlan()
+    loadRestDays()
   }
   if (!event || String(event.key || '').includes('pf_nutrition_')) {
     loadNutritionToday()
@@ -1534,6 +1555,7 @@ const previousRangeEndDate = computed(() => endOfDay(shiftDays(rangeStartDate.va
 const previousRangeStartDate = computed(() => startOfDay(shiftDays(previousRangeEndDate.value, -(rangeDays.value - 1))))
 const yearAgoRangeStartDate = computed(() => startOfDay(shiftYears(rangeStartDate.value, -1)))
 const yearAgoRangeEndDate = computed(() => endOfDay(shiftYears(rangeEndDate.value, -1)))
+const visibleLogs = computed(() => getVisibleWorkoutLogs(logs.value, restDays.value))
 
 const periodLabel = computed(() => `Last ${rangeDays.value} days`)
 const periodStartIso = computed(() => toIsoDate(rangeStartDate.value))
@@ -1559,7 +1581,7 @@ function clampDateRange(date, minDate, maxDate) {
 }
 
 function getLogsWithinRange(startDate, endDate) {
-  return logs.value.filter((item) => {
+  return visibleLogs.value.filter((item) => {
     const date = parseLocalDate(item.date)
     return date && date >= startDate && date <= endDate
   })
@@ -1627,7 +1649,7 @@ function buildWindowStats(startDate, endDate) {
 }
 
 const logsInRange = computed(() =>
-  logs.value
+  visibleLogs.value
     .filter((item) => {
       const date = parseLocalDate(item.date)
       return date && date >= rangeStartDate.value && date <= rangeEndDate.value
@@ -3654,10 +3676,11 @@ watch(analyticsSummaryFingerprint, async () => {
 })
 
 watch(
-  [logsKey, planKey],
+  [logsKey, planKey, restKey],
   () => {
     loadLogs()
     loadPlan()
+    loadRestDays()
     loadNutritionToday()
   },
   { immediate: true }
@@ -3675,6 +3698,7 @@ watch(rangeDays, () => {
 onMounted(() => {
   loadLogs()
   loadPlan()
+  loadRestDays()
   loadNutritionToday()
   loadCachedAiInsight()
   loadCloudAiInsight()
@@ -3683,6 +3707,7 @@ onMounted(() => {
     window.addEventListener('storage', handleStorage)
     window.addEventListener('pf_logs_updated', loadLogs)
     window.addEventListener('pf_plan_updated', loadPlan)
+    window.addEventListener('pf_rest_updated', loadRestDays)
     window.addEventListener('pf_nutrition_updated', loadNutritionToday)
     if (typeof MutationObserver !== 'undefined' && document?.documentElement) {
       themeObserver = new MutationObserver(syncThemeSnapshot)
@@ -3699,6 +3724,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', handleStorage)
     window.removeEventListener('pf_logs_updated', loadLogs)
     window.removeEventListener('pf_plan_updated', loadPlan)
+    window.removeEventListener('pf_rest_updated', loadRestDays)
     window.removeEventListener('pf_nutrition_updated', loadNutritionToday)
   }
   themeObserver?.disconnect()

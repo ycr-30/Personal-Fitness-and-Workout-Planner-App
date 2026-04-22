@@ -305,6 +305,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { getVisibleWorkoutLogs, nextRestDaySet, sameDateKeySet, updateLogsRestSuppression } from '@/lib/restDayState'
 import { getUserStorageKey } from '@/lib/userStorage'
 import { useUserSettings } from '@/composables/useUserSettings'
 import { buildWorkoutLocationSuggestions, getLatestWorkoutLocation } from '@/utils/workoutLocations'
@@ -334,7 +335,7 @@ const createForm = reactive({
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const locationSuggestions = computed(() => {
   const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
-  return buildWorkoutLocationSuggestions(logs.value, defaultLocation)
+  return buildWorkoutLocationSuggestions(visibleLogs.value, defaultLocation)
 })
 const muscleGroupOptions = [
   { value: 'Chest', label: 'Chest' },
@@ -469,7 +470,8 @@ function normalizeWorkout(item) {
     location: item?.location || '',
     exercises: Array.isArray(item?.exercises) ? item.exercises : [],
     prs: Number(item?.prs) || 0,
-    status: item?.status === 'completed' ? 'completed' : 'pending'
+    status: item?.status === 'completed' ? 'completed' : 'pending',
+    restSuppressed: Boolean(item?.restSuppressed)
   }
 }
 
@@ -512,10 +514,27 @@ function saveLogs(next) {
   window.dispatchEvent(new Event('pf_logs_updated'))
 }
 
-function saveRestDays() {
+function saveRestDays(nextRestDays = restDays.value) {
+  const normalizedSet = nextRestDays instanceof Set ? new Set(nextRestDays) : new Set()
+  restDays.value = normalizedSet
   if (typeof window === 'undefined') return
-  localStorage.setItem(restKey.value, JSON.stringify(Array.from(restDays.value)))
+  localStorage.setItem(restKey.value, JSON.stringify(Array.from(normalizedSet)))
   window.dispatchEvent(new Event('pf_rest_updated'))
+}
+
+function updateRestDay(dateKey, shouldRest) {
+  const nextRestDays = nextRestDaySet(restDays.value, dateKey, shouldRest)
+  if (sameDateKeySet(restDays.value, nextRestDays)) return false
+  saveRestDays(nextRestDays)
+  return true
+}
+
+function setRestDayState(dateKey, shouldRest) {
+  const nextLogs = updateLogsRestSuppression(logs.value, dateKey, shouldRest)
+  if (nextLogs !== logs.value) {
+    saveLogs(nextLogs)
+  }
+  return updateRestDay(dateKey, shouldRest) || nextLogs !== logs.value
 }
 
 function handleStorage(event) {
@@ -527,10 +546,11 @@ function handleStorage(event) {
 
 const todayIso = computed(() => toIsoDate(new Date()))
 const selectedDateIso = computed(() => toIsoDate(selectedDate.value))
+const visibleLogs = computed(() => getVisibleWorkoutLogs(logs.value, restDays.value))
 
 const dayStatsMap = computed(() => {
   const map = new Map()
-  logs.value.forEach((item) => {
+  visibleLogs.value.forEach((item) => {
     const key = item.date
     if (!key) return
     if (!map.has(key)) {
@@ -580,7 +600,7 @@ const calendarCells = computed(() => {
 })
 
 const selectedDayLogs = computed(() =>
-  logs.value
+  visibleLogs.value
     .filter((item) => item.date === selectedDateIso.value)
     .sort((a, b) => {
       if (a.status === b.status) return String(a.title || '').localeCompare(String(b.title || ''))
@@ -616,19 +636,19 @@ function parseDurationToMinutes(value) {
 }
 
 const todayMinutes = computed(() => {
-  return logs.value
+  return visibleLogs.value
     .filter((item) => item.date === todayIso.value)
     .reduce((sum, item) => sum + parseDurationToMinutes(item.duration), 0)
 })
 
 const overdueCount = computed(() => {
-  return logs.value.filter((item) => item.status !== 'completed' && item.date < todayIso.value).length
+  return visibleLogs.value.filter((item) => item.status !== 'completed' && item.date < todayIso.value).length
 })
 
 const monthStats = computed(() => {
   const year = calendarMonth.value.getFullYear()
   const month = calendarMonth.value.getMonth()
-  const items = logs.value.filter((item) => {
+  const items = visibleLogs.value.filter((item) => {
     const date = parseLocalDate(item.date)
     return date && date.getFullYear() === year && date.getMonth() === month
   })
@@ -646,7 +666,7 @@ const monthCompletionRate = computed(() => {
 
 const scheduleWorkoutNames = computed(() => {
   const names = new Set(Object.keys(workoutGroupMap))
-  logs.value.forEach((item) => {
+  visibleLogs.value.forEach((item) => {
     const entries = Array.isArray(item?.exercises) ? item.exercises : []
     entries.forEach((exercise) => {
       const name = String(exercise?.name || '').trim()
@@ -660,7 +680,7 @@ const schedulePrCount = computed(() => {
   const current = createForm.exercises.filter((exercise) => exercise.name)
   if (!current.length) return 0
 
-  const history = logs.value.flatMap((workout) => workout.exercises || [])
+  const history = visibleLogs.value.flatMap((workout) => workout.exercises || [])
   let count = 0
 
   current.forEach((exercise) => {
@@ -686,7 +706,7 @@ const schedulePrCount = computed(() => {
 
 const completionStreak = computed(() => {
   const completedDates = new Set(
-    logs.value.filter((item) => item.status === 'completed').map((item) => item.date)
+    visibleLogs.value.filter((item) => item.status === 'completed').map((item) => item.date)
   )
   let count = 0
   const cursor = new Date()
@@ -750,7 +770,7 @@ function getWorkoutDefaults() {
   )
   const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
   return {
-    location: getLatestWorkoutLocation(logs.value, defaultLocation),
+    location: getLatestWorkoutLocation(visibleLogs.value, defaultLocation),
     rpe: Number(userSettings.value?.workout_default_rpe) || 6,
     durationHours: hours,
     durationMinutes: minutes
@@ -931,10 +951,7 @@ function saveCreateSession() {
   const next = [entry, ...logs.value].sort((a, b) => (a.date < b.date ? 1 : -1))
   saveLogs(next)
 
-  if (restDays.value.has(date)) {
-    restDays.value.delete(date)
-    saveRestDays()
-  }
+  setRestDayState(date, false)
 
   const nextDate = parseLocalDate(date)
   if (nextDate) {
@@ -962,9 +979,8 @@ function removeWorkout(id) {
 
 function toggleRestDayForSelected() {
   const key = selectedDateIso.value
-  if (restDays.value.has(key)) restDays.value.delete(key)
-  else restDays.value.add(key)
-  saveRestDays()
+  const shouldMarkRestDay = !selectedIsRest.value
+  setRestDayState(key, shouldMarkRestDay)
 }
 
 function openMoveModal(item) {
@@ -985,6 +1001,7 @@ function applyMove() {
     item.id === movingWorkoutId.value ? { ...item, date: moveDate.value } : item
   )
   saveLogs(next)
+  setRestDayState(moveDate.value, false)
   const nextDate = parseLocalDate(moveDate.value)
   if (nextDate) {
     selectedDate.value = nextDate

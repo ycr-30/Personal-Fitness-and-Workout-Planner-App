@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient'
 import { getUserStorageKey } from './userStorage'
 import { buildAuthServerUrl } from './authServerOrigin'
 import { fetchJsonWithTimeout } from './fetchWithTimeout'
+import { getVisibleWorkoutLogs } from './restDayState'
 import { buildDefaultNutritionTargets, toNumber } from '@/utils/nutritionCalculations'
 import { buildPlanGoalLink } from '@/utils/nutritionGoalMapping'
 
@@ -23,7 +24,8 @@ export function readStoredPlanState(user) {
 export function readStoredWorkoutLogs(user) {
   if (!user) return []
   const rows = readJson(getUserStorageKey('pf_workout_logs', user), [])
-  return Array.isArray(rows) ? rows : []
+  const restDays = readJson(getUserStorageKey('pf_rest_days', user), [])
+  return getVisibleWorkoutLogs(Array.isArray(rows) ? rows : [], Array.isArray(restDays) ? restDays : [])
 }
 
 function parseDurationMinutes(value) {

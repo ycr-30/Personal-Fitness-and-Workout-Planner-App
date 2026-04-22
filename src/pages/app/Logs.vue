@@ -100,7 +100,7 @@
           <h3>{{ emptyTitle }}</h3>
           <p>{{ emptyMessage }}</p>
         </div>
-        <button v-if="workouts.length === 0" class="btn primary" type="button" @click="openForm">
+        <button v-if="visibleWorkouts.length === 0" class="btn primary" type="button" @click="openForm">
           Log Workout
         </button>
       </div>
@@ -163,7 +163,7 @@
       </div>
 
       <footer class="table-footer">
-        <span>Showing {{ filteredWorkouts.length }} of {{ workouts.length }} workouts</span>
+        <span>Showing {{ filteredWorkouts.length }} of {{ visibleWorkouts.length }} workouts</span>
       </footer>
     </div>
 
@@ -338,13 +338,16 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { getVisibleWorkoutLogs, nextRestDaySet, sameDateKeySet, updateLogsRestSuppression } from '@/lib/restDayState'
 import { getUserStorageKey } from '@/lib/userStorage'
 import { useUserSettings } from '@/composables/useUserSettings'
 import { buildWorkoutLocationSuggestions, getLatestWorkoutLocation } from '@/utils/workoutLocations'
 
 const auth = useAuthStore()
 const storageKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
+const restKey = computed(() => getUserStorageKey('pf_rest_days', auth.user))
 const workouts = ref([])
+const restDays = ref(new Set())
 const searchField = ref(null)
 const searchQuery = ref('')
 const showForm = ref(false)
@@ -448,10 +451,30 @@ function loadWorkouts() {
   }
 }
 
+function loadRestDays() {
+  const raw = localStorage.getItem(restKey.value)
+  if (!raw) return new Set()
+  try {
+    const data = JSON.parse(raw)
+    return Array.isArray(data) ? new Set(data) : new Set()
+  } catch (err) {
+    console.error('Failed to parse rest days in workout log', err)
+    return new Set()
+  }
+}
+
 watch(
   storageKey,
   () => {
     workouts.value = loadWorkouts()
+  },
+  { immediate: true }
+)
+
+watch(
+  restKey,
+  () => {
+    restDays.value = loadRestDays()
   },
   { immediate: true }
 )
@@ -476,10 +499,17 @@ function handleOpenLogModal() {
   openForm()
 }
 
+function handleRestDayUpdated() {
+  restDays.value = loadRestDays()
+  workouts.value = loadWorkouts()
+}
+
 onMounted(() => {
   loadSettings()
   if (typeof window !== 'undefined') {
     window.addEventListener('pf_open_log_modal', handleOpenLogModal)
+    window.addEventListener('pf_rest_updated', handleRestDayUpdated)
+    window.addEventListener('pf_logs_updated', handleRestDayUpdated)
     const pending = localStorage.getItem(PENDING_MUSCLE_MAP_KEY)
     if (pending) {
       try {
@@ -497,6 +527,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('pf_open_log_modal', handleOpenLogModal)
+    window.removeEventListener('pf_rest_updated', handleRestDayUpdated)
+    window.removeEventListener('pf_logs_updated', handleRestDayUpdated)
   }
 })
 
@@ -504,6 +536,22 @@ function syncWorkouts(next) {
   if (typeof window === 'undefined') return
   localStorage.setItem(storageKey.value, JSON.stringify(next))
   window.dispatchEvent(new Event('pf_logs_updated'))
+}
+
+function clearRestDayState(dateKey) {
+  if (typeof window === 'undefined') return
+  const currentRestDays = loadRestDays()
+  const nextWorkouts = updateLogsRestSuppression(workouts.value, dateKey, false)
+  if (nextWorkouts !== workouts.value) {
+    workouts.value = nextWorkouts
+    syncWorkouts(workouts.value)
+  }
+  const nextRestDays = nextRestDaySet(currentRestDays, dateKey, false)
+  if (!sameDateKeySet(currentRestDays, nextRestDays)) {
+    restDays.value = nextRestDays
+    localStorage.setItem(restKey.value, JSON.stringify(Array.from(nextRestDays)))
+    window.dispatchEvent(new Event('pf_rest_updated'))
+  }
 }
 
 const muscleGroups = computed(() => muscleGroupOptions.map((option) => option.value))
@@ -530,9 +578,11 @@ function clearSearch() {
   searchField.value?.focus?.()
 }
 
+const visibleWorkouts = computed(() => getVisibleWorkoutLogs(workouts.value, restDays.value))
+
 const filteredWorkouts = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
-  return workouts.value.filter((item) => {
+  return visibleWorkouts.value.filter((item) => {
     if (keyword) {
       const title = (item.title || '').toLowerCase()
       const subtitle = (item.subtitle || '').toLowerCase()
@@ -584,18 +634,18 @@ const filteredWorkouts = computed(() => {
 })
 
 const emptyTitle = computed(() =>
-  workouts.value.length ? 'No matching results found.' : 'No workouts logged yet'
+  visibleWorkouts.value.length ? 'No matching results found.' : 'No workouts logged yet'
 )
 
 const emptyMessage = computed(() =>
-  workouts.value.length
+  visibleWorkouts.value.length
     ? 'Try a different keyword or filter.'
     : 'Click "Log Workout" to add your first session.'
 )
 
 const locationSuggestions = computed(() => {
   const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
-  return buildWorkoutLocationSuggestions(workouts.value, defaultLocation)
+  return buildWorkoutLocationSuggestions(visibleWorkouts.value, defaultLocation)
 })
 
 const muscleGroupOptions = [
@@ -626,7 +676,7 @@ const prCount = computed(() => {
   const current = form.exercises.filter((exercise) => exercise.name)
   if (!current.length) return 0
 
-  const history = workouts.value.flatMap((workout) => workout.exercises || [])
+  const history = visibleWorkouts.value.flatMap((workout) => workout.exercises || [])
   let count = 0
 
   current.forEach((exercise) => {
@@ -732,7 +782,7 @@ function getWorkoutDefaults() {
   )
   const defaultLocation = (userSettings.value?.workout_default_location || '').trim()
   return {
-    location: getLatestWorkoutLocation(workouts.value, defaultLocation),
+    location: getLatestWorkoutLocation(visibleWorkouts.value, defaultLocation),
     rpe: Number(userSettings.value?.workout_default_rpe) || 6,
     durationHours: hours,
     durationMinutes: minutes
@@ -824,6 +874,7 @@ function addWorkout() {
 
   workouts.value = [entry, ...workouts.value]
   syncWorkouts(workouts.value)
+  clearRestDayState(form.date)
   resetForm()
   closeForm()
 }

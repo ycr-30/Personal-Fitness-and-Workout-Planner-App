@@ -962,11 +962,13 @@ import {
   sanitizePlanStateSnapshot,
   sanitizePlanWeightRecords
 } from '@/lib/planWeightRecords'
+import { getVisibleWorkoutLogs } from '@/lib/restDayState'
 import { getUserStorageKey } from '@/lib/userStorage'
 
 const auth = useAuthStore()
 const storageKey = computed(() => getUserStorageKey('pf_plan_state', auth.user))
 const logsKey = computed(() => getUserStorageKey('pf_workout_logs', auth.user))
+const restKey = computed(() => getUserStorageKey('pf_rest_days', auth.user))
 const CALORIES_PER_MINUTE = 6
 
 const showGoalModal = ref(false)
@@ -2652,7 +2654,10 @@ function loadWorkouts() {
   if (!raw) return []
   try {
     const data = JSON.parse(raw)
-    return Array.isArray(data) ? data : []
+    const workouts = Array.isArray(data) ? data : []
+    const restRaw = window.localStorage.getItem(restKey.value)
+    const restDays = restRaw ? JSON.parse(restRaw) : []
+    return getVisibleWorkoutLogs(workouts, Array.isArray(restDays) ? restDays : [])
   } catch (error) {
     console.error('Failed to parse workouts', error)
     return []
@@ -3141,12 +3146,14 @@ onMounted(() => {
   }
   if (typeof window !== 'undefined') {
     window.addEventListener('pf_logs_updated', calcActivity)
+    window.addEventListener('pf_rest_updated', calcActivity)
   }
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('pf_logs_updated', calcActivity)
+    window.removeEventListener('pf_rest_updated', calcActivity)
   }
   if (timeTicker) {
     clearInterval(timeTicker)
@@ -3169,6 +3176,14 @@ watch(
 
 watch(
   logsKey,
+  () => {
+    calcActivity()
+  },
+  { immediate: true }
+)
+
+watch(
+  restKey,
   () => {
     calcActivity()
   },
