@@ -98,13 +98,11 @@
               <label for="register-birthday">Date of birth</label>
               <input
                 id="register-birthday"
-                :value="form.birthday"
-                type="text"
-                inputmode="numeric"
-                placeholder="YYYY-MM-DD"
-                maxlength="10"
-                @input="onBirthdayInput"
-                @blur="touched.birthday = true; normalizeBirthdayInput()"
+                v-model="form.birthday"
+                type="date"
+                lang="en-CA"
+                autocomplete="bday"
+                @blur="touched.birthday = true; form.birthday = normalizeBirthdayValue(form.birthday)"
               />
               <p v-if="touched.birthday && birthdayError" class="helper helper-error">
                 {{ birthdayError }}
@@ -304,26 +302,6 @@ function normalizeBirthdayValue(value) {
   return parsed.toISOString().split('T')[0]
 }
 
-function formatBirthdayDraft(value) {
-  const digits = String(value || '').replace(/\D/g, '').slice(0, 8)
-  if (!digits) return ''
-  if (digits.length <= 4) return digits
-  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`
-  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`
-}
-
-function onBirthdayInput(event) {
-  const nextValue = normalizeBirthdayValue(event?.target?.value) || formatBirthdayDraft(event?.target?.value)
-  form.birthday = nextValue
-  if (event?.target && event.target.value !== nextValue) {
-    event.target.value = nextValue
-  }
-}
-
-function normalizeBirthdayInput() {
-  form.birthday = normalizeBirthdayValue(form.birthday) || formatBirthdayDraft(form.birthday)
-}
-
 // 估算体脂率
 const bodyFat = computed(() => {
   if (!form.height || !form.weight || !form.birthday) return null
@@ -355,7 +333,7 @@ const bodyFatWarning = computed(() => {
 
 const birthdayError = computed(() => {
   if (!form.birthday) return 'Please select your date of birth.'
-  return normalizeBirthdayValue(form.birthday) ? '' : 'Please use the YYYY-MM-DD format.'
+  return normalizeBirthdayValue(form.birthday) ? '' : 'Please enter a valid date.'
 })
 
 const inlineErrors = computed(() => {
