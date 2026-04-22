@@ -98,13 +98,16 @@
               <label for="register-birthday">Date of birth</label>
               <input
                 id="register-birthday"
-                v-model="form.birthday"
-                type="date"
-                lang="en"
-                @blur="touched.birthday = true"
+                :value="form.birthday"
+                type="text"
+                inputmode="numeric"
+                placeholder="YYYY-MM-DD"
+                maxlength="10"
+                @input="onBirthdayInput"
+                @blur="touched.birthday = true; normalizeBirthdayInput()"
               />
-              <p v-if="touched.birthday && !form.birthday" class="helper helper-error">
-                Please select your date of birth.
+              <p v-if="touched.birthday && birthdayError" class="helper helper-error">
+                {{ birthdayError }}
               </p>
             </div>
 
@@ -292,6 +295,35 @@ function generateUsernameFromEmail(val) {
   return (cleaned || 'user') + suffix
 }
 
+function normalizeBirthdayValue(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toISOString().split('T')[0]
+}
+
+function formatBirthdayDraft(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 8)
+  if (!digits) return ''
+  if (digits.length <= 4) return digits
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`
+}
+
+function onBirthdayInput(event) {
+  const nextValue = normalizeBirthdayValue(event?.target?.value) || formatBirthdayDraft(event?.target?.value)
+  form.birthday = nextValue
+  if (event?.target && event.target.value !== nextValue) {
+    event.target.value = nextValue
+  }
+}
+
+function normalizeBirthdayInput() {
+  form.birthday = normalizeBirthdayValue(form.birthday) || formatBirthdayDraft(form.birthday)
+}
+
 // 估算体脂率
 const bodyFat = computed(() => {
   if (!form.height || !form.weight || !form.birthday) return null
@@ -319,6 +351,11 @@ const bodyFatWarning = computed(() => {
     return 'This value looks unusual — please double check the numbers.'
   }
   return ''
+})
+
+const birthdayError = computed(() => {
+  if (!form.birthday) return 'Please select your date of birth.'
+  return normalizeBirthdayValue(form.birthday) ? '' : 'Please use the YYYY-MM-DD format.'
 })
 
 const inlineErrors = computed(() => {
@@ -356,7 +393,6 @@ const hasBlockingErrors = computed(() => {
   if (
     !form.name ||
     !form.account ||
-    !form.birthday ||
     !form.height ||
     !form.weight
   ) {
@@ -364,6 +400,7 @@ const hasBlockingErrors = computed(() => {
   }
   if (!isSocial.value && (!form.password || !form.confirm)) return true
   return (
+    !!birthdayError.value ||
     !!inlineErrors.value.account ||
     (!!inlineErrors.value.password && !isSocial.value) ||
     (!!inlineErrors.value.confirm && !isSocial.value)
@@ -457,6 +494,13 @@ async function onSubmit() {
     auth.error = 'Please review the highlighted fields.'
     return
   }
+
+  const normalizedBirthday = normalizeBirthdayValue(form.birthday)
+  if (!normalizedBirthday) {
+    auth.error = 'Please review the highlighted fields.'
+    return
+  }
+  form.birthday = normalizedBirthday
 
   if (isSocial.value) {
     try {
