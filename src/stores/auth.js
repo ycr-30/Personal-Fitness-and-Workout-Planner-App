@@ -3,6 +3,8 @@ import { defineStore } from 'pinia'
 import { supabase } from '@/lib/supabaseClient'
 import { buildAuthServerUrl } from '@/lib/authServerOrigin'
 import { loadUserOnboardingAnswers, normalizeOnboardingAnswers, saveUserOnboardingAnswers } from '@/lib/userOnboardingCloud'
+import { saveLocalAppStateToCloud } from '@/lib/cloudStateApi'
+import { syncLocalDataToSupabase } from '@/lib/supabaseSync'
 
 const USERS_KEY = 'pf_users' // All registered users stored in browser storage during prototype mode
 const CURRENT_KEY = 'pf_current_user' // Storage key for the currently signed-in account
@@ -804,6 +806,18 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async logout() {
+      const userToFlush = this.user
+      if (userToFlush) {
+        const results = await Promise.allSettled([
+          saveLocalAppStateToCloud(userToFlush),
+          syncLocalDataToSupabase({ interactive: false, localUser: userToFlush })
+        ])
+        results.forEach((result) => {
+          if (result.status === 'rejected') {
+            console.error('Pre-logout data sync failed', result.reason)
+          }
+        })
+      }
       try {
         await fetch(buildAuthServerUrl('/logout'), {
           method: 'POST',

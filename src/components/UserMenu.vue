@@ -77,15 +77,15 @@ function handleClickOutside(event) {
 async function signOut() {
   closeMenu()
   auth.beginLogoutTransition()
-  await router.replace({ name: 'login' })
   await auth.logout()
+  await router.replace({ name: 'login' })
 }
 
 async function switchAccount() {
   closeMenu()
   auth.beginLogoutTransition()
-  await router.replace({ name: 'login', query: { mode: 'switch' } })
   await auth.logout()
+  await router.replace({ name: 'login', query: { mode: 'switch' } })
 }
 
 onMounted(() => {

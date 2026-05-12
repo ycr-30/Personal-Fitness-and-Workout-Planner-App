@@ -62,6 +62,7 @@ import {
   fetchCloudAppState,
   getLocalAppStateMeta,
   isCloudAppStateNewerThanLocal,
+  markLocalAppStateDirty,
   saveLocalAppStateToCloud
 } from '@/lib/cloudStateApi'
 import { getStableDeviceId, loadCloudClientState, saveCloudClientState } from '@/lib/cloudClientState'
@@ -238,7 +239,11 @@ watch(
       }
     }
 
-    if (hasLocalData && !hydratedFromBackend && localStorage.getItem(backendKey) !== '1') {
+    if (
+      hasLocalData &&
+      !hydratedFromBackend &&
+      (localStorage.getItem(backendKey) !== '1' || localAppStateMeta?.dirty)
+    ) {
       try {
         await saveLocalAppStateToCloud(auth.user)
         localStorage.setItem(backendKey, '1')
@@ -256,7 +261,8 @@ watch(
         ['localhost', '127.0.0.1'].includes(window.location.hostname)
 
       const result = await syncLocalDataToSupabase({
-        interactive: !isLocalDevHost && !alreadyConnected
+        interactive: !isLocalDevHost && !alreadyConnected,
+        localUser: auth.user
       })
       if (result?.status === 'done') {
         localStorage.setItem(key, '1')
@@ -272,27 +278,37 @@ watch(
   { immediate: true }
 )
 
+async function flushUserState(user) {
+  if (!user) return
+  try {
+    await saveLocalAppStateToCloud(user)
+    localStorage.setItem(backendSyncKeyForUser(user), '1')
+    syncCloudFlags(user)
+  } catch (error) {
+    console.error('Backend cloud sync failed', error)
+  }
+  try {
+    await syncLocalDataToSupabase({ interactive: false, localUser: user })
+    localStorage.setItem(syncKeyForUser(user), '1')
+    localStorage.setItem(connectedKeyForUser(user), '1')
+    syncCloudFlags(user)
+  } catch (error) {
+    console.error('Cloud sync failed', error)
+  }
+}
+
 function scheduleAutoSync() {
-  if (!auth.user || isPublicGuestRoute.value) return
+  const user = auth.user
+  if (!user || isPublicGuestRoute.value) return
+  markLocalAppStateDirty(user)
+  localStorage.removeItem(backendSyncKeyForUser(user))
+  localStorage.removeItem(syncKeyForUser(user))
   if (syncTimer.value) {
     clearTimeout(syncTimer.value)
   }
-  syncTimer.value = setTimeout(async () => {
-    try {
-      await saveLocalAppStateToCloud(auth.user)
-      localStorage.setItem(backendSyncKeyForUser(auth.user), '1')
-      syncCloudFlags(auth.user)
-    } catch (error) {
-      console.error('Backend cloud sync failed', error)
-    }
-    try {
-      await syncLocalDataToSupabase({ interactive: false })
-      localStorage.setItem(syncKeyForUser(auth.user), '1')
-      localStorage.setItem(connectedKeyForUser(auth.user), '1')
-      syncCloudFlags(auth.user)
-    } catch (error) {
-      console.error('Cloud sync failed', error)
-    }
+  syncTimer.value = setTimeout(() => {
+    syncTimer.value = null
+    flushUserState(user)
   }, 800)
 }
 

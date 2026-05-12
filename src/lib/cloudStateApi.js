@@ -42,7 +42,9 @@ function writeLocalAppStateMeta(user, updatedAt) {
   localStorage.setItem(
     metaKey,
     JSON.stringify({
-      updatedAt: normalizedUpdatedAt
+      updatedAt: normalizedUpdatedAt,
+      localUpdatedAt: normalizedUpdatedAt,
+      dirty: false
     })
   )
 }
@@ -51,15 +53,35 @@ export function getLocalAppStateMeta(user) {
   if (!user || typeof window === 'undefined') return null
   const meta = readJson(getAppStateMetaKey(user), null)
   const updatedAt = normalizeUpdatedAt(meta?.updatedAt)
-  return updatedAt ? { updatedAt } : null
+  const localUpdatedAt = normalizeUpdatedAt(meta?.localUpdatedAt)
+  const dirty = Boolean(meta?.dirty)
+  return updatedAt || localUpdatedAt ? { updatedAt, localUpdatedAt, dirty } : null
 }
 
 export function isCloudAppStateNewerThanLocal(appState, localMeta) {
   const cloudTime = getUpdatedAtTime(appState?.updatedAt)
-  const localTime = getUpdatedAtTime(localMeta?.updatedAt)
+  const localTime = Math.max(
+    getUpdatedAtTime(localMeta?.updatedAt),
+    getUpdatedAtTime(localMeta?.localUpdatedAt)
+  )
   if (!cloudTime) return false
+  if (localMeta?.dirty && localTime >= cloudTime) return false
   if (!localTime) return true
   return cloudTime > localTime
+}
+
+export function markLocalAppStateDirty(user, updatedAt = new Date().toISOString()) {
+  if (!user || typeof window === 'undefined') return
+  const metaKey = getAppStateMetaKey(user)
+  const previous = readJson(metaKey, {})
+  localStorage.setItem(
+    metaKey,
+    JSON.stringify({
+      updatedAt: normalizeUpdatedAt(previous?.updatedAt),
+      localUpdatedAt: normalizeUpdatedAt(updatedAt) || new Date().toISOString(),
+      dirty: true
+    })
+  )
 }
 
 export function getLocalAppState(user) {

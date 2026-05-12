@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient'
-import { getStorageKeyForId } from './userStorage'
+import { getIdentityFromUser, getStorageKeyForId } from './userStorage'
 import {
   clearNutritionGoalsDirty,
   clearNutritionMealsDirty,
@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   logs: 'pf_workout_logs',
   rest: 'pf_rest_days'
 }
+const APP_STATE_META_STORAGE_KEY = 'pf_app_state_meta'
 
 function readJson(key, fallback) {
   try {
@@ -31,6 +32,74 @@ function readJson(key, fallback) {
 function readUserJson(baseKey, userId, fallback) {
   const key = getStorageKeyForId(baseKey, userId)
   return readJson(key, fallback)
+}
+
+function readExistingUserJson(baseKey, identity, fallback) {
+  if (!identity) return { found: false, value: fallback }
+  try {
+    const key = getStorageKeyForId(baseKey, identity)
+    const raw = localStorage.getItem(key)
+    if (raw === null) return { found: false, value: fallback }
+    return { found: true, value: JSON.parse(raw) }
+  } catch {
+    return { found: true, value: fallback }
+  }
+}
+
+function getLocalIdentityCandidates(supabaseUserId, localUser = null) {
+  const candidates = [
+    supabaseUserId,
+    localUser?.id,
+    localUser?.user_id,
+    localUser?.providerId,
+    localUser?.supabaseUserId,
+    localUser ? getIdentityFromUser(localUser) : '',
+    localUser?.email,
+    localUser?.account
+  ]
+  return [...new Set(candidates.map((item) => String(item || '').trim()).filter(Boolean))]
+}
+
+function readFirstExistingUserJson(baseKey, identities, fallback) {
+  for (const identity of identities) {
+    const result = readExistingUserJson(baseKey, identity, fallback)
+    if (result.found) return result.value
+  }
+  return readUserJson(baseKey, identities[0], fallback)
+}
+
+function getStoredStateMetaTime(identity) {
+  const result = readExistingUserJson(APP_STATE_META_STORAGE_KEY, identity, null)
+  const meta = result.value && typeof result.value === 'object' ? result.value : null
+  const times = [meta?.localUpdatedAt, meta?.updatedAt]
+    .map((value) => {
+      const parsed = new Date(String(value || '')).getTime()
+      return Number.isFinite(parsed) ? parsed : 0
+    })
+    .filter(Boolean)
+  return times.length ? Math.max(...times) : 0
+}
+
+function hasAnyStoredAppState(identity) {
+  return Object.values(STORAGE_KEYS).some((baseKey) => {
+    try {
+      return localStorage.getItem(getStorageKeyForId(baseKey, identity)) !== null
+    } catch {
+      return false
+    }
+  })
+}
+
+function chooseLocalStateIdentity(identities) {
+  const existing = identities.filter((identity) => hasAnyStoredAppState(identity))
+  if (!existing.length) return identities[0]
+  return existing
+    .map((identity, index) => ({
+      identity,
+      index,
+      metaTime: getStoredStateMetaTime(identity)
+    }))
+    .sort((a, b) => b.metaTime - a.metaTime || a.index - b.index)[0].identity
 }
 
 function isUuidLike(value) {
@@ -289,7 +358,7 @@ async function syncLocalNutritionDataToSupabase(userId) {
 }
 
 export async function syncLocalDataToSupabase(options = {}) {
-  const { interactive = false } = options
+  const { interactive = false, localUser = null } = options
   if (!supabase) {
     throw new Error('Supabase client not configured.')
   }
@@ -306,9 +375,11 @@ export async function syncLocalDataToSupabase(options = {}) {
   const userId = userData.user?.id
   if (!userId) throw new Error('No user found.')
 
-  const planState = readUserJson(STORAGE_KEYS.plan, userId, null)
-  const workoutLogs = readUserJson(STORAGE_KEYS.logs, userId, [])
-  const restDays = readUserJson(STORAGE_KEYS.rest, userId, [])
+  const localIdentities = getLocalIdentityCandidates(userId, localUser)
+  const localStateIdentity = chooseLocalStateIdentity(localIdentities)
+  const planState = readFirstExistingUserJson(STORAGE_KEYS.plan, [localStateIdentity], null)
+  const workoutLogs = readFirstExistingUserJson(STORAGE_KEYS.logs, [localStateIdentity], [])
+  const restDays = readFirstExistingUserJson(STORAGE_KEYS.rest, [localStateIdentity], [])
 
   if (planState) {
     await upsertByUser('user_plans', userId, { plan_state: planState })
