@@ -962,6 +962,7 @@ import {
   sanitizePlanStateSnapshot,
   sanitizePlanWeightRecords
 } from '@/lib/planWeightRecords'
+import { useMealEntries } from '@/composables/useMealEntries'
 import { getVisibleWorkoutLogs } from '@/lib/restDayState'
 import { getUserStorageKey } from '@/lib/userStorage'
 
@@ -1025,6 +1026,8 @@ const modalForm = reactive({
   challengeTarget: '',
   filters: { ...defaultRelatedFilters }
 })
+const planNutritionDate = ref(new Date())
+const { entries: planMealEntries, refresh: refreshPlanMealEntries } = useMealEntries(planNutritionDate)
 
 const goalOptions = [
   {
@@ -1786,9 +1789,18 @@ const trainingStatusMessage = computed(() => {
   return `Needs improvement · ${minutes} min this week`
 })
 
+const loggedNutritionIntakeKcal = computed(() =>
+  (planMealEntries.value || []).reduce((total, entry) => total + (toNumber(entry?.calories) || 0), 0)
+)
+
+const effectiveIntakeKcal = computed(() => {
+  if (loggedNutritionIntakeKcal.value > 0) return loggedNutritionIntakeKcal.value
+  return toNumber(planState.dailyLogs.intakeKcal) || 0
+})
+
 const intakeDisplay = computed(() => {
-  const value = toNumber(planState.dailyLogs.intakeKcal)
-  return value && value > 0 ? `${value} kcal` : 'Please input'
+  const value = effectiveIntakeKcal.value
+  return value > 0 ? `${Math.round(value)} kcal` : 'Please input'
 })
 
 const sleepDisplay = computed(() => {
@@ -1833,7 +1845,7 @@ const circumferenceDisplay = computed(() => {
 const intakeStatus = computed(() => {
   const target = toNumber(planState.challengeValues.intake)
   if (!target || target <= 0) return ''
-  const intake = toNumber(planState.dailyLogs.intakeKcal)
+  const intake = effectiveIntakeKcal.value
   if (!intake || intake <= 0) return 'Below target'
   if (intake < target * 0.9) return 'Below target'
   if (intake <= target * 1.1) return 'On target'
@@ -1842,7 +1854,7 @@ const intakeStatus = computed(() => {
 
 const showDeficitNotice = computed(() => {
   if (!planState.selectedChallenges.includes('deficit')) return false
-  const intake = toNumber(planState.dailyLogs.intakeKcal)
+  const intake = effectiveIntakeKcal.value
   const deficit = toNumber(planState.dailyLogs.deficitKcal)
   return !intake && !deficit
 })
@@ -3053,8 +3065,7 @@ function formatChallengeCurrent(id) {
   if (id === 'duration') return activityMinutes.value
   if (id === 'strengthSets') return weeklyStrengthSets.value
   if (id === 'intake') {
-    const intake = toNumber(planState.dailyLogs.intakeKcal)
-    return intake ?? 0
+    return Math.round(effectiveIntakeKcal.value)
   }
   if (id === 'deficit') {
     const deficit = toNumber(planState.dailyLogs.deficitKcal)
@@ -3133,10 +3144,16 @@ watch(weightDetailRange, () => {
   weightRangeOffset.value = 0
 })
 
+function refreshPlanNutritionEntries() {
+  planNutritionDate.value = new Date()
+  refreshPlanMealEntries()
+}
+
 onMounted(() => {
   loadPlan()
   ensureWeightRecords()
   calcActivity()
+  refreshPlanNutritionEntries()
   currentTime.value = formatClock(new Date())
   timeTicker = setInterval(() => {
     currentTime.value = formatClock(new Date())
@@ -3147,6 +3164,7 @@ onMounted(() => {
   if (typeof window !== 'undefined') {
     window.addEventListener('pf_logs_updated', calcActivity)
     window.addEventListener('pf_rest_updated', calcActivity)
+    window.addEventListener('pf_nutrition_updated', refreshPlanNutritionEntries)
   }
 })
 
@@ -3154,6 +3172,7 @@ onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('pf_logs_updated', calcActivity)
     window.removeEventListener('pf_rest_updated', calcActivity)
+    window.removeEventListener('pf_nutrition_updated', refreshPlanNutritionEntries)
   }
   if (timeTicker) {
     clearInterval(timeTicker)
